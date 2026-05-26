@@ -1,6 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
+function slashPath(p: string): string {
+  return p.replace(/\\/g, "/");
+}
+
 import {
   stableNodePath,
   buildLaunchdPlist,
@@ -60,12 +64,14 @@ describe("install paths", () => {
   it("REPORT_SCRIPT points at the compiled report.js inside dist/", () => {
     // Catches a typo in the dist/reporter/report.js path that would
     // otherwise install a daemon that can't even start.
+    const reportScript = slashPath(REPORT_SCRIPT);
+    const projectRoot = slashPath(PROJECT_ROOT);
     assert.ok(
-      REPORT_SCRIPT.endsWith("/dist/reporter/report.js"),
+      reportScript.endsWith("/dist/reporter/report.js"),
       `REPORT_SCRIPT should end with /dist/reporter/report.js, got: ${REPORT_SCRIPT}`,
     );
     assert.ok(
-      REPORT_SCRIPT.startsWith(PROJECT_ROOT + "/"),
+      reportScript.startsWith(projectRoot + "/"),
       "REPORT_SCRIPT should be inside PROJECT_ROOT",
     );
   });

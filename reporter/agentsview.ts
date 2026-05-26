@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
+import * as path from "node:path";
 import { errMessage } from "./errors";
 import type { DailyUsage, ModelBreakdown } from "./usage";
 
@@ -29,14 +30,28 @@ interface RawDailyEntry {
 // so we can't rely on execvp's default search. Resolution order:
 //   1. $AGENTSVIEW_BIN (explicit override for nix, asdf, custom installs)
 //   2. Hard-coded install-location candidates (matches the quickstart)
-//   3. $PATH via `which agentsview` (covers interactive runs)
+//   3. $PATH (covers interactive runs)
 // Lazy so tests can swap HOME per-case.
 function agentsviewCandidates(): string[] {
-  return [
-    `${process.env.HOME}/.local/bin/agentsview`,
-    "/opt/homebrew/bin/agentsview",
-    "/usr/local/bin/agentsview",
-  ];
+  const homeDirs = uniqueDefined([process.env.HOME, process.env.USERPROFILE]);
+  const names = process.platform === "win32"
+    ? ["agentsview.exe", "agentsview.cmd", "agentsview.bat", "agentsview"]
+    : ["agentsview"];
+  const candidates: string[] = [];
+
+  for (const home of homeDirs) {
+    for (const name of names) {
+      candidates.push(path.join(home, ".local", "bin", name));
+      candidates.push(path.join(home, ".agentsview", "bin", name));
+    }
+  }
+
+  candidates.push("/opt/homebrew/bin/agentsview", "/usr/local/bin/agentsview");
+  return uniqueDefined(candidates);
+}
+
+function uniqueDefined(values: Array<string | undefined>): string[] {
+  return [...new Set(values.filter((value): value is string => Boolean(value)))];
 }
 
 function isExecutableFile(p: string): boolean {
@@ -47,19 +62,38 @@ function isExecutableFile(p: string): boolean {
   } catch { return false; }
 }
 
+function pathExecutableNames(command: string): string[] {
+  if (process.platform !== "win32" || path.extname(command)) return [command];
+
+  const extensions = uniqueDefined(
+    (process.env.PATHEXT || ".COM;.EXE;.BAT;.CMD")
+      .split(";")
+      .map((ext) => ext.trim())
+      .filter(Boolean)
+      .map((ext) => (ext.startsWith(".") ? ext : `.${ext}`).toLowerCase()),
+  );
+  return [command, ...extensions.map((ext) => `${command}${ext}`)];
+}
+
+function resolveFromPath(command: string): string | null {
+  const pathValue = process.env.PATH || process.env.Path || process.env.path || "";
+  for (const dir of pathValue.split(path.delimiter)) {
+    if (!dir) continue;
+    for (const name of pathExecutableNames(command)) {
+      const candidate = path.join(dir, name);
+      if (isExecutableFile(candidate)) return candidate;
+    }
+  }
+  return null;
+}
+
 export function resolveAgentsview(): string | null {
   const override = process.env.AGENTSVIEW_BIN;
   if (override && isExecutableFile(override)) return override;
   for (const p of agentsviewCandidates()) {
     if (isExecutableFile(p)) return p;
   }
-  try {
-    const viaPath = execFileSync("/usr/bin/env", ["which", "agentsview"], {
-      encoding: "utf-8", timeout: 5000,
-    }).trim();
-    if (viaPath && isExecutableFile(viaPath)) return viaPath;
-  } catch {}
-  return null;
+  return resolveFromPath("agentsview");
 }
 
 // Parses `agentsview --version` raw output like
