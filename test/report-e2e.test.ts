@@ -55,6 +55,31 @@ function runReporter(env: Record<string, string>, timeoutMs = 30000, script: str
 // `{"daily":[]}` for the inactive scenario. The script also logs its argv
 // to argvLog so tests can inspect the --since windows.
 function writeFakeAgentsview(fakeBin, argvLog, dailyJson) {
+  if (process.platform === "win32") {
+    fs.writeFileSync(
+      fakeBin,
+      `const fs = require("fs");
+const path = require("path");
+const args = process.argv.slice(1);
+const cmd = path.basename(args[0] || "");
+if (cmd !== "usage" && cmd !== "stats") return;
+args[0] = cmd;
+fs.appendFileSync(${JSON.stringify(argvLog)}, args.join("\\t") + "\\n");
+if (cmd === "usage") {
+  console.log(${JSON.stringify(dailyJson)});
+  process.exit(0);
+}
+let since = "";
+for (let i = 0; i < args.length; i++) {
+  if (args[i] === "--since") since = args[i + 1] || "";
+}
+console.log(JSON.stringify({ schema_version: 1, window: { days_arg: since }, totals: { sessions_all: 7 }, generated_at: "2026-04-24T00:00:00Z" }));
+process.exit(0);
+`,
+    );
+    return;
+  }
+
   fs.writeFileSync(
     fakeBin,
     `#!/usr/bin/env bash
@@ -92,8 +117,9 @@ esac
 async function setupE2E({ dailyJson }) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tkmx-e2e-"));
   const argvLog = path.join(tmp, "argv.log");
-  const fakeBin = path.join(tmp, "fake-agentsview");
-  writeFakeAgentsview(fakeBin, argvLog, dailyJson);
+  const fakeScript = path.join(tmp, process.platform === "win32" ? "fake-agentsview-preload.cjs" : "fake-agentsview");
+  writeFakeAgentsview(fakeScript, argvLog, dailyJson);
+  const fakeBin = process.platform === "win32" ? process.execPath : fakeScript;
 
   let captured = null;
   const server = http.createServer((req, res) => {
@@ -115,10 +141,14 @@ async function setupE2E({ dailyJson }) {
     PATH: process.env.PATH,
     HOME: tmp,  // isolates cursor db lookup
     USERNAME: "e2euser",
+    TKMX_USERNAME: "e2euser",
     API_KEY: "e2ekey",
     CLIENT_ID: "e2e-client-id-fixed",  // avoid writing to .env
     SERVER_URL: `http://127.0.0.1:${port}`,
     AGENTSVIEW_BIN: fakeBin,
+    NODE_OPTIONS: process.platform === "win32"
+      ? `${process.env.NODE_OPTIONS || ""} --require=${fakeScript}`.trim()
+      : process.env.NODE_OPTIONS,
     REPORT_DAYS: "1",
     REPORT_DEV_STATS: "true",
     REPORT_SESSION_STATS: "true",
@@ -196,6 +226,37 @@ test("REPORT_DAYS=1 still invokes agentsview with --since 28d for session_stats"
       "POSTed session_stats should reflect the 28d window that agentsview was asked for",
     );
     assert.equal(captured.report_days, 1);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test(".env USERNAME beats inherited OS USERNAME", async () => {
+  const ctx = await setupE2E({ dailyJson: '{"daily":[]}' });
+  const testEnv = [
+    "USERNAME=dotenv-user",
+    "API_KEY=dotenv-key",
+    "CLIENT_ID=dotenv-client-id",
+    "TEAM=dotenv-team",
+  ].join("\n");
+  fs.writeFileSync(ENV_PATH, `${testEnv}\n`);
+  const env = { ...ctx.baseEnv, USERNAME: "windows-account-name" };
+  delete env.TKMX_USERNAME;
+  delete env.API_KEY;
+  delete env.CLIENT_ID;
+  delete env.TEAM;
+  try {
+    const result = await runReporter(env);
+    assert.equal(
+      result.status,
+      0,
+      `reporter exited non-zero.\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
+    );
+    const captured = ctx.getCaptured();
+    assert.ok(captured, "server did not capture a POST body");
+    assert.equal(captured.username, "dotenv-user");
+    assert.equal(captured.team, "dotenv-team");
+    assert.equal(captured.client_id, "dotenv-client-id");
   } finally {
     ctx.cleanup();
   }

@@ -139,21 +139,33 @@ describe("resolveAgentsview", () => {
   // `which agentsview` miss.
   function withIsolatedEnv(fn) {
     const origHome = process.env.HOME;
+    const origUserProfile = process.env.USERPROFILE;
     const origPath = process.env.PATH;
+    const origPathExt = process.env.PATHEXT;
     const origBin = process.env.AGENTSVIEW_BIN;
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tkmx-resolve-"));
     process.env.HOME = tmp;
+    process.env.USERPROFILE = tmp;
     process.env.PATH = "";
+    process.env.PATHEXT = ".EXE;.CMD;.BAT;.COM";
     delete process.env.AGENTSVIEW_BIN;
     try {
       return fn(tmp);
     } finally {
       process.env.HOME = origHome;
+      if (origUserProfile === undefined) delete process.env.USERPROFILE;
+      else process.env.USERPROFILE = origUserProfile;
       process.env.PATH = origPath;
+      if (origPathExt === undefined) delete process.env.PATHEXT;
+      else process.env.PATHEXT = origPathExt;
       if (origBin === undefined) delete process.env.AGENTSVIEW_BIN;
       else process.env.AGENTSVIEW_BIN = origBin;
       fs.rmSync(tmp, { recursive: true, force: true });
     }
+  }
+
+  function localBinCandidate(tmp) {
+    return path.join(tmp, ".local", "bin", process.platform === "win32" ? "agentsview.exe" : "agentsview");
   }
 
   it("returns null when no candidate path exists", () => {
@@ -165,16 +177,16 @@ describe("resolveAgentsview", () => {
 
   it("returns the first existing executable candidate", () => {
     withIsolatedEnv((tmp) => {
-      const fake = path.join(tmp, ".local", "bin", "agentsview");
+      const fake = localBinCandidate(tmp);
       writeExec(fake);
       const { resolveAgentsview } = require("../reporter/agentsview");
       assert.equal(resolveAgentsview(), fake);
     });
   });
 
-  it("skips non-executable candidates", () => {
+  it("skips non-executable candidates", { skip: process.platform === "win32" }, () => {
     withIsolatedEnv((tmp) => {
-      const fake = path.join(tmp, ".local", "bin", "agentsview");
+      const fake = localBinCandidate(tmp);
       fs.mkdirSync(path.dirname(fake), { recursive: true });
       fs.writeFileSync(fake, "#!/bin/sh\n");
       fs.chmodSync(fake, 0o644); // not executable
@@ -193,9 +205,9 @@ describe("resolveAgentsview", () => {
 
   it("respects AGENTSVIEW_BIN override", () => {
     withIsolatedEnv((tmp) => {
-      const override = path.join(tmp, "nix", "store", "agentsview");
+      const override = path.join(tmp, "nix", "store", process.platform === "win32" ? "agentsview.exe" : "agentsview");
       writeExec(override);
-      const candidate = path.join(tmp, ".local", "bin", "agentsview");
+      const candidate = localBinCandidate(tmp);
       writeExec(candidate);
       process.env.AGENTSVIEW_BIN = override;
       const { resolveAgentsview } = require("../reporter/agentsview");
@@ -205,7 +217,7 @@ describe("resolveAgentsview", () => {
 
   it("ignores AGENTSVIEW_BIN override when it points at nothing", () => {
     withIsolatedEnv((tmp) => {
-      const candidate = path.join(tmp, ".local", "bin", "agentsview");
+      const candidate = localBinCandidate(tmp);
       writeExec(candidate);
       process.env.AGENTSVIEW_BIN = "/nonexistent/agentsview";
       const { resolveAgentsview } = require("../reporter/agentsview");
@@ -216,9 +228,29 @@ describe("resolveAgentsview", () => {
   it("falls back to PATH when no hard-coded candidate exists", () => {
     withIsolatedEnv((tmp) => {
       const pathDir = path.join(tmp, "custom", "bin");
-      const fake = path.join(pathDir, "agentsview");
+      const fake = path.join(pathDir, process.platform === "win32" ? "agentsview.exe" : "agentsview");
       writeExec(fake);
-      process.env.PATH = `${pathDir}:/usr/bin:/bin`;
+      process.env.PATH = [pathDir, "/usr/bin", "/bin"].join(path.delimiter);
+      const { resolveAgentsview } = require("../reporter/agentsview");
+      assert.equal(resolveAgentsview(), fake);
+    });
+  });
+
+  it("finds the Windows installer location under USERPROFILE", { skip: process.platform !== "win32" }, () => {
+    withIsolatedEnv((tmp) => {
+      const fake = path.join(tmp, ".agentsview", "bin", "agentsview.exe");
+      writeExec(fake);
+      const { resolveAgentsview } = require("../reporter/agentsview");
+      assert.equal(resolveAgentsview(), fake);
+    });
+  });
+
+  it("uses PATHEXT when resolving agentsview from PATH on Windows", { skip: process.platform !== "win32" }, () => {
+    withIsolatedEnv((tmp) => {
+      const pathDir = path.join(tmp, "custom", "bin");
+      const fake = path.join(pathDir, "agentsview.exe");
+      writeExec(fake);
+      process.env.PATH = pathDir;
       const { resolveAgentsview } = require("../reporter/agentsview");
       assert.equal(resolveAgentsview(), fake);
     });

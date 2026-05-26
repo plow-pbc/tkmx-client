@@ -3,8 +3,8 @@
   "version": "1.3.0",
   "private": true,
   "scripts": {
-    "build": "rm -rf dist && tsc",
-    "build:tests": "tsc -p tsconfig.test.json && cp -R test/fixtures dist/test/fixtures",
+    "build": "node scripts/clean-dist.cjs && tsc",
+    "build:tests": "tsc -p tsconfig.test.json && node scripts/copy-test-fixtures.cjs",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json --noEmit",
     "report": "node dist/reporter/report.js",
     "install-service": "node dist/reporter/install.js",

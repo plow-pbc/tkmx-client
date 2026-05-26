@@ -24,7 +24,7 @@ export function stableNodePath(
 ): string {
   const brewMatch = execPath.match(/^(.*)\/Cellar\/node\/[^/]+\/bin\/node$/);
   if (brewMatch) {
-    const stable = path.join(brewMatch[1], "bin", "node");
+    const stable = `${brewMatch[1]}/bin/node`;
     if (existsSync(stable)) return stable;
   }
   return execPath;
