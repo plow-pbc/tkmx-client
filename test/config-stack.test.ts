@@ -1,8 +1,6 @@
-import { describe, it, before, after, beforeEach } from "node:test";
+import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import * as fs from "node:fs";
 import * as os from "node:os";
-import * as path from "node:path";
 
 // config-stack reads from fixed paths, so we test the individual helpers
 // by checking they return sane types and don't crash on missing data
