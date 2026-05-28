@@ -79,7 +79,9 @@ function agentsviewCandidates(deps: ResolveDeps): string[] {
 function resolveFromPath(deps: ResolveDeps): string | null {
   const p = pathFor(deps.platform);
   const name = binaryName(deps.platform);
-  const pathValue = deps.env.PATH || deps.env.Path || "";
+  // process.env is case-insensitive on Windows, so PATH already resolves a
+  // `Path`/`path`-cased var (production passes process.env; tests inject PATH).
+  const pathValue = deps.env.PATH || "";
   for (const dir of pathValue.split(p.delimiter)) {
     if (!dir) continue;
     const candidate = p.join(dir, name);

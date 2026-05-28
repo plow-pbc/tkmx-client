@@ -72,7 +72,7 @@ interface EnvironmentInfo {
 // Shell, terminal, editor from environment
 export function collectEnvironment(): EnvironmentInfo {
   const env: EnvironmentInfo = {};
-  env.shell = path.basename(process.env.SHELL || process.env.COMSPEC || process.env.ComSpec || "");
+  env.shell = path.basename(process.env.SHELL || process.env.COMSPEC || "");
   if (process.env.TERM_PROGRAM) env.terminal = process.env.TERM_PROGRAM;
   if (process.env.TMUX) env.multiplexer = "tmux";
   else if (process.env.ZELLIJ) env.multiplexer = "zellij";

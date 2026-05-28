@@ -31,7 +31,11 @@ const ENV_PATH = path.join(PROJECT_ROOT, ".env");
 const ENV_FILE = dotenv.config({ path: ENV_PATH }).parsed || {};
 
 import { version as CLIENT_VERSION } from "../package.json";
-const USERNAME = process.env.TKMX_USERNAME || ENV_FILE.USERNAME || process.env.USERNAME;
+// USERNAME comes only from TKMX_USERNAME or .env — never the ambient OS
+// account name (process.env.USERNAME), which on Windows would silently
+// misattribute usage to the logged-in account. Missing config fails the
+// startup guard below rather than posting to the wrong profile.
+const USERNAME = process.env.TKMX_USERNAME || ENV_FILE.USERNAME;
 const SERVER_URL = process.env.SERVER_URL || "https://tokenmaxxing.odio.dev";
 const TEAM = process.env.TEAM || "default";
 const API_KEY = process.env.API_KEY;
