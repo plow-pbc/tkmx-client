@@ -4,7 +4,7 @@ import * as path from "node:path";
 import * as os from "node:os";
 import * as fs from "node:fs";
 
-import { parseAgentsviewOutput, toIsoDate, collectAgentsviewUsage } from "../reporter/agentsview";
+import { parseAgentsviewOutput, toIsoDate, collectAgentsviewUsage, resolveAgentsviewWith } from "../reporter/agentsview";
 
 // Write an executable fixture (default: a no-op shell stub) and mark it +x.
 function writeExec(p, body = "#!/bin/sh\n") {
@@ -141,13 +141,11 @@ describe("resolveAgentsview", () => {
     const origHome = process.env.HOME;
     const origUserProfile = process.env.USERPROFILE;
     const origPath = process.env.PATH;
-    const origPathExt = process.env.PATHEXT;
     const origBin = process.env.AGENTSVIEW_BIN;
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tkmx-resolve-"));
     process.env.HOME = tmp;
     process.env.USERPROFILE = tmp;
     process.env.PATH = "";
-    process.env.PATHEXT = ".EXE;.CMD;.BAT;.COM";
     delete process.env.AGENTSVIEW_BIN;
     try {
       return fn(tmp);
@@ -156,8 +154,6 @@ describe("resolveAgentsview", () => {
       if (origUserProfile === undefined) delete process.env.USERPROFILE;
       else process.env.USERPROFILE = origUserProfile;
       process.env.PATH = origPath;
-      if (origPathExt === undefined) delete process.env.PATHEXT;
-      else process.env.PATHEXT = origPathExt;
       if (origBin === undefined) delete process.env.AGENTSVIEW_BIN;
       else process.env.AGENTSVIEW_BIN = origBin;
       fs.rmSync(tmp, { recursive: true, force: true });
@@ -236,23 +232,44 @@ describe("resolveAgentsview", () => {
     });
   });
 
-  it("finds the Windows installer location under USERPROFILE", { skip: process.platform !== "win32" }, () => {
-    withIsolatedEnv((tmp) => {
-      const fake = path.join(tmp, ".agentsview", "bin", "agentsview.exe");
-      writeExec(fake);
-      const { resolveAgentsview } = require("../reporter/agentsview");
-      assert.equal(resolveAgentsview(), fake);
+});
+
+// The Windows branch runs on any host by injecting platform/env/isExecutable,
+// so CI (Linux) actually exercises it instead of skipping. Paths are built
+// with path.win32 semantics regardless of the host separator.
+describe("resolveAgentsviewWith — Windows branch (host-independent)", () => {
+  const winEnv = (overrides = {}) => ({ USERPROFILE: "C:\\Users\\dev", PATH: "", ...overrides });
+
+  it("finds agentsview.exe in the installer location under USERPROFILE", () => {
+    const expected = path.win32.join("C:\\Users\\dev", ".agentsview", "bin", "agentsview.exe");
+    const found = resolveAgentsviewWith({
+      platform: "win32",
+      env: winEnv(),
+      isExecutable: (p) => p === expected,
     });
+    assert.equal(found, expected);
   });
 
-  it("uses PATHEXT when resolving agentsview from PATH on Windows", { skip: process.platform !== "win32" }, () => {
-    withIsolatedEnv((tmp) => {
-      const pathDir = path.join(tmp, "custom", "bin");
-      const fake = path.join(pathDir, "agentsview.exe");
-      writeExec(fake);
-      process.env.PATH = pathDir;
-      const { resolveAgentsview } = require("../reporter/agentsview");
-      assert.equal(resolveAgentsview(), fake);
+  it("resolves agentsview.exe from a ;-separated PATH", () => {
+    const dir = "C:\\tools\\bin";
+    const expected = path.win32.join(dir, "agentsview.exe");
+    const found = resolveAgentsviewWith({
+      platform: "win32",
+      env: winEnv({ PATH: ["C:\\other", dir].join(path.win32.delimiter) }),
+      isExecutable: (p) => p === expected,
     });
+    assert.equal(found, expected);
+  });
+
+  it("never resolves a .cmd/.bat shim — execFileSync can't run one on Windows", () => {
+    // Even if a shim is the only thing on disk, the resolver must not hand it
+    // back: it only ever probes agentsview.exe, so a shim is never a candidate.
+    const shim = path.win32.join("C:\\Users\\dev", ".local", "bin", "agentsview.cmd");
+    const found = resolveAgentsviewWith({
+      platform: "win32",
+      env: winEnv(),
+      isExecutable: (p) => p === shim,
+    });
+    assert.equal(found, null);
   });
 });

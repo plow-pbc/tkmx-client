@@ -190,6 +190,7 @@ after(() => {
   if (savedState !== null) fs.writeFileSync(STATE_PATH, savedState);
   else if (fs.existsSync(STATE_PATH)) fs.unlinkSync(STATE_PATH);
   if (savedEnv !== null) fs.writeFileSync(ENV_PATH, savedEnv);
+  else if (fs.existsSync(ENV_PATH)) fs.unlinkSync(ENV_PATH);
 });
 
 test("REPORT_DAYS=1 still invokes agentsview with --since 28d for session_stats", async () => {
