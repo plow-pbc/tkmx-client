@@ -157,6 +157,7 @@ async function setupE2E({ dailyJson }) {
     // / git from collectMachineConfig.
     REPORT_MACHINE_CONFIG: "false",
     EXTRA_CLAUDE_CONFIGS: "",
+    EXTRA_CODEX_CONFIGS: "",
     OPENAI_ADMIN_KEY: "",
     TEAM: "e2e",
   };
@@ -352,6 +353,63 @@ test("openclaw rows are present in the POST body when OPENCLAW_SESSIONS_DIRS poi
     assert.ok(opus, `missing opus row for 2026-05-26 in: ${JSON.stringify(openclawRows)}`);
     assert.equal(opus.totalTokens, 220);
   } finally {
+    ctx.cleanup();
+  }
+});
+
+test("EXTRA_CODEX_CONFIGS folds each valid sessions/ dir's codex usage into the POST and skips dirs without sessions/", async () => {
+  // The reviewer's bot Codex accounts live in separate homes
+  // (docker/secrets/codex-account-*), outside the local ~/.codex agentsview
+  // scans by default. EXTRA_CODEX_CONFIGS points the reporter at those homes;
+  // each valid entry's codex usage must sum into the codex source stream
+  // (server PK is (user,date,model,client_id) — colliding rows must sum, not
+  // drop), while an entry missing the sessions/ subdir is skipped, not fatal.
+  const ctx = await setupE2E({
+    dailyJson:
+      '{"daily":[{"date":"2026-05-25","modelBreakdowns":[{"modelName":"gpt-5.5","inputTokens":1000,"outputTokens":100,"cacheCreationTokens":0,"cacheReadTokens":0}]}]}',
+  });
+  const extraRoot = fs.mkdtempSync(path.join(os.tmpdir(), "tkmx-codex-"));
+  const validDir = path.join(extraRoot, "codex-account-a");
+  const invalidDir = path.join(extraRoot, "codex-account-broken");
+  fs.mkdirSync(path.join(validDir, "sessions"), { recursive: true });
+  fs.mkdirSync(invalidDir, { recursive: true }); // no sessions/ subdir → skipped
+  try {
+    const result = await runReporter({
+      ...ctx.baseEnv,
+      REPORT_DAYS: "3650", // wide window so the fixture date passes the sinceStr filter
+      EXTRA_CODEX_CONFIGS: `${validDir},${invalidDir}`,
+    });
+    assert.equal(
+      result.status,
+      0,
+      `reporter exited non-zero.\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
+    );
+    const captured = ctx.getCaptured();
+    assert.ok(captured, "server did not capture a POST body");
+
+    const day = (captured as any).data.find((d) => d.date === "2026-05-25");
+    assert.ok(day, `missing 2026-05-25 in POST data: ${JSON.stringify((captured as any).data)}`);
+
+    // Local ~/.codex (1000) + one valid extra dir (1000) sum on the same
+    // (date, gpt-5.5, codex) row; the invalid dir contributes nothing (else 3000).
+    const codexRow = day.modelBreakdowns.find((m) => m.source === "codex" && m.modelName === "gpt-5.5");
+    assert.ok(codexRow, `missing codex gpt-5.5 row: ${JSON.stringify(day.modelBreakdowns)}`);
+    assert.equal(codexRow.inputTokens, 2000, "valid extra codex dir must sum into the codex stream; invalid dir must not add");
+    assert.equal(codexRow.outputTokens, 200);
+    assert.equal(codexRow.totalTokens, 2200);
+
+    // The extra-codex dirs must not bleed into the claude source.
+    const claudeRow = day.modelBreakdowns.find((m) => m.source === "claude" && m.modelName === "gpt-5.5");
+    assert.ok(claudeRow, "expected a claude-source row from the local scan");
+    assert.equal(claudeRow.inputTokens, 1000, "extra codex dirs must not be counted under claude");
+
+    assert.match(
+      result.stderr,
+      /codex-account-broken.*sessions/i,
+      `expected a skip note naming the dir missing sessions/, got stderr:\n${result.stderr}`,
+    );
+  } finally {
+    fs.rmSync(extraRoot, { recursive: true, force: true });
     ctx.cleanup();
   }
 });

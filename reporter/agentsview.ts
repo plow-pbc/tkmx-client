@@ -225,3 +225,13 @@ export function collectAgentsviewClaudeOnly(bin: string, sinceStr: string, env: 
   const since = toIsoDate(sinceStr);
   return queryAgent(bin, since, "claude", false, timeoutMs, env);
 }
+
+// Single-agent (Codex) collection against an isolated agentsview data dir +
+// codex sessions dir. Used for EXTRA_CODEX_CONFIGS entries — e.g. the reviewer
+// bot's per-account ~/.codex homes that live outside the local ~/.codex
+// agentsview scans by default — without contaminating the local machine's
+// ~/.agentsview/sessions.db.
+export function collectAgentsviewCodexOnly(bin: string, sinceStr: string, env: Record<string, string>, timeoutMs: number = 180000): DailyUsage[] {
+  const since = toIsoDate(sinceStr);
+  return queryAgent(bin, since, "codex", false, timeoutMs, env);
+}

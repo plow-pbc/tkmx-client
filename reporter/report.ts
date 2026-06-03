@@ -8,6 +8,7 @@ import * as https from "node:https";
 import {
   collectAgentsviewUsage,
   collectAgentsviewClaudeOnly,
+  collectAgentsviewCodexOnly,
   resolveAgentsview,
   detectAgentsviewVersion,
 } from "./agentsview";
@@ -47,6 +48,7 @@ const ABOUT = process.env.ABOUT || "";
 const HN_USERNAME = process.env.HN_USERNAME || "";
 const DEMO_VIDEO_URL = process.env.DEMO_VIDEO_URL || "";
 const EXTRA_CLAUDE_CONFIGS = process.env.EXTRA_CLAUDE_CONFIGS || "";
+const EXTRA_CODEX_CONFIGS = process.env.EXTRA_CODEX_CONFIGS || "";
 
 if (!USERNAME || !API_KEY) {
   console.error("USERNAME and API_KEY must be set in .env");
@@ -266,6 +268,36 @@ async function main(): Promise<void> {
     claudeDaily = claudeDaily.concat(remoteDaily);
   }
 
+  // Codex homes outside the local ~/.codex (e.g. the reviewer bot's per-account
+  // docker/secrets/codex-account-* homes). Each entry is a codex home whose
+  // sessions/ subdir agentsview parses via CODEX_SESSIONS_DIR; results fold into
+  // codexDaily so mergeDailyUsage sums same-(model,codex,date) rows across
+  // accounts rather than colliding on the server's PK.
+  let allCodexDaily: DailyUsage[] = [...codexDaily];
+  for (const entry of parseExtraConfigs(EXTRA_CODEX_CONFIGS)) {
+    const absEntry = path.resolve(entry);
+    const label = path.basename(absEntry) || absEntry;
+    const sessionsDir = path.join(absEntry, "sessions");
+    if (!fs.existsSync(sessionsDir)) {
+      console.error(`  Codex (${label}) skipped: missing sessions/ subdir at ${absEntry}`);
+      continue;
+    }
+    const dataDir = agentsviewDataDirFor(absEntry);
+    let remoteDaily: DailyUsage[];
+    try {
+      fs.mkdirSync(dataDir, { recursive: true });
+      remoteDaily = collectAgentsviewCodexOnly(agentsviewBin, sinceStr, {
+        AGENT_VIEWER_DATA_DIR: dataDir,
+        CODEX_SESSIONS_DIR: sessionsDir,
+      });
+    } catch (err) {
+      console.error(`  Codex (${label}) failed: ${errMessage(err)}`);
+      continue;
+    }
+    console.log(`  Codex (${label}): ${remoteDaily.length} days`);
+    allCodexDaily = allCodexDaily.concat(remoteDaily);
+  }
+
   const openaiDaily = await collectOpenAIUsage(sinceStr);
   if (openaiDaily.length > 0) {
     console.log(`  OpenAI platform: ${openaiDaily.length} days`);
@@ -284,7 +316,7 @@ async function main(): Promise<void> {
     console.log(`  OpenClaw: ${openclawDaily.length} days from ${openclawDirs.length} root(s)`);
   }
 
-  const mergedDaily = mergeDailyUsage(claudeDaily, codexDaily, openaiDaily, openclawDaily);
+  const mergedDaily = mergeDailyUsage(claudeDaily, allCodexDaily, openaiDaily, openclawDaily);
 
   if (mergedDaily.length === 0) {
     // Previously we returned here, skipping session_stats / cursor_stats
