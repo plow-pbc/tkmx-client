@@ -216,7 +216,7 @@ EXTRA_CLAUDE_CONFIGS=/path/to/synced-laptop,/path/to/synced-desktop
 
 The reporter runs `agentsview` once per directory (each with its own `AGENT_VIEWER_DATA_DIR` under `~/.agentsview-tkmx/<hash>/` and `CLAUDE_PROJECTS_DIR` pointing at `<dir>/projects`) and merges the results with the local machine's usage before submitting. Each remote mirror gets its own incrementally-synced sqlite, so re-runs are cheap.
 
-The Codex equivalent is `EXTRA_CODEX_CONFIGS` — a comma-separated list of Codex homes, each containing a `sessions/` subdirectory (the `~/.codex` layout). Use it to fold in Codex accounts whose data lives outside the local `~/.codex`, e.g. a reviewer bot's per-account homes. It works the same way (one `agentsview` run per home, isolated `AGENT_VIEWER_DATA_DIR`, `CODEX_SESSIONS_DIR` pointing at `<home>/sessions`) and its usage sums into the `codex` source. A home missing `sessions/` is skipped; any other collection failure aborts the run rather than POSTing a silent partial.
+The Codex equivalent is `EXTRA_CODEX_CONFIGS` — a comma-separated list of Codex homes, each containing a `sessions/` subdirectory (the `~/.codex` layout). Use it to fold in Codex accounts whose data lives outside the local `~/.codex`, e.g. a reviewer bot's per-account homes. It works the same way (one `agentsview` run per home, isolated `AGENT_VIEWER_DATA_DIR`, `CODEX_SESSIONS_DIR` pointing at `<home>/sessions`) and its usage sums into the `codex` source. A configured home that can't be collected — missing `sessions/`, or any agentsview failure — aborts the run rather than POSTing a silent partial; fix the path in `.env` and the next run recovers.
 
 ```
 EXTRA_CODEX_CONFIGS=/path/to/codex-account-a,/path/to/codex-account-b

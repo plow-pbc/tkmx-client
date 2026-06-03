@@ -107,9 +107,10 @@ function agentsviewDataDirFor(absConfigDir: string): string {
 // containing `subdir` (projects/ for claude, sessions/ for codex); its usage is
 // synced into an isolated data dir (so it can't contaminate the local
 // sessions.db) and returned for the caller to fold into the matching source.
-// A home missing `subdir` is skipped — it isn't a valid home for this agent —
-// but any other collection failure is fatal: a run must never POST a silently
-// partial total as success (the original cause of weeks of unreported usage).
+// A configured home that can't be collected — missing `subdir`, or any
+// agentsview failure — is fatal: the operator listed it, so the run aborts
+// rather than POST a silently partial total as success (the original cause of
+// weeks of unreported usage).
 function collectExtraAgentsviewHomes(
   bin: string,
   sinceStr: string,
@@ -122,8 +123,7 @@ function collectExtraAgentsviewHomes(
     const name = path.basename(absEntry) || absEntry;
     const subdirPath = path.join(absEntry, opts.subdir);
     if (!fs.existsSync(subdirPath)) {
-      console.error(`  ${opts.label} (${name}) skipped: missing ${opts.subdir}/ subdir at ${absEntry}`);
-      continue;
+      throw new Error(`${opts.label} (${name}) missing ${opts.subdir}/ subdir at ${absEntry} — a configured EXTRA_${opts.label.toUpperCase()}_CONFIGS home must be a valid ${opts.agent} home`);
     }
     const dataDir = agentsviewDataDirFor(absEntry);
     fs.mkdirSync(dataDir, { recursive: true });

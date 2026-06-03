@@ -359,27 +359,24 @@ test("openclaw rows are present in the POST body when OPENCLAW_SESSIONS_DIRS poi
   }
 });
 
-test("EXTRA_CODEX_CONFIGS folds each valid sessions/ dir's codex usage into the POST and skips dirs without sessions/", async () => {
+test("EXTRA_CODEX_CONFIGS sums a valid home's codex usage into the POST, scanning the right home", async () => {
   // The reviewer's bot Codex accounts live in separate homes
   // (docker/secrets/codex-account-*), outside the local ~/.codex agentsview
   // scans by default. EXTRA_CODEX_CONFIGS points the reporter at those homes;
   // each valid entry's codex usage must sum into the codex source stream
-  // (server PK is (user,date,model,client_id) — colliding rows must sum, not
-  // drop), while an entry missing the sessions/ subdir is skipped, not fatal.
+  // (server PK is (user,date,model,client_id) — colliding rows must sum, not drop).
   const ctx = await setupE2E({
     dailyJson:
       '{"daily":[{"date":"2026-05-25","modelBreakdowns":[{"modelName":"gpt-5.5","inputTokens":1000,"outputTokens":100,"cacheCreationTokens":0,"cacheReadTokens":0}]}]}',
   });
   const extraRoot = fs.mkdtempSync(path.join(os.tmpdir(), "tkmx-codex-"));
   const validDir = path.join(extraRoot, "codex-account-a");
-  const invalidDir = path.join(extraRoot, "codex-account-broken");
   fs.mkdirSync(path.join(validDir, "sessions"), { recursive: true });
-  fs.mkdirSync(invalidDir, { recursive: true }); // no sessions/ subdir → skipped
   try {
     const result = await runReporter({
       ...ctx.baseEnv,
       REPORT_DAYS: "3650", // wide window so the fixture date passes the sinceStr filter
-      EXTRA_CODEX_CONFIGS: `${validDir},${invalidDir}`,
+      EXTRA_CODEX_CONFIGS: validDir,
     });
     assert.equal(
       result.status,
@@ -392,38 +389,59 @@ test("EXTRA_CODEX_CONFIGS folds each valid sessions/ dir's codex usage into the 
     const day = (captured as any).data.find((d) => d.date === "2026-05-25");
     assert.ok(day, `missing 2026-05-25 in POST data: ${JSON.stringify((captured as any).data)}`);
 
-    // Local ~/.codex (1000) + one valid extra dir (1000) sum on the same
-    // (date, gpt-5.5, codex) row; the invalid dir contributes nothing (else 3000).
+    // Local ~/.codex (1000) + the valid extra home (1000) sum on the same
+    // (date, gpt-5.5, codex) row.
     const codexRow = day.modelBreakdowns.find((m) => m.source === "codex" && m.modelName === "gpt-5.5");
     assert.ok(codexRow, `missing codex gpt-5.5 row: ${JSON.stringify(day.modelBreakdowns)}`);
-    assert.equal(codexRow.inputTokens, 2000, "valid extra codex dir must sum into the codex stream; invalid dir must not add");
+    assert.equal(codexRow.inputTokens, 2000, "valid extra codex home must sum into the codex stream");
     assert.equal(codexRow.outputTokens, 200);
     assert.equal(codexRow.totalTokens, 2200);
 
-    // The extra-codex dirs must not bleed into the claude source.
+    // The extra-codex home must not bleed into the claude source.
     const claudeRow = day.modelBreakdowns.find((m) => m.source === "claude" && m.modelName === "gpt-5.5");
     assert.ok(claudeRow, "expected a claude-source row from the local scan");
-    assert.equal(claudeRow.inputTokens, 1000, "extra codex dirs must not be counted under claude");
-
-    assert.match(
-      result.stderr,
-      /codex-account-broken.*sessions/i,
-      `expected a skip note naming the dir missing sessions/, got stderr:\n${result.stderr}`,
-    );
+    assert.equal(claudeRow.inputTokens, 1000, "extra codex home must not be counted under claude");
 
     // The merge total alone can't prove the reporter scanned the *right* home
     // (a wrong-path scan that still returned 1000 would also sum to 2000).
     // Assert agentsview was invoked for codex with CODEX_SESSIONS_DIR pointing
-    // at the valid home's sessions/ — and never at the skipped invalid dir.
+    // at the valid home's sessions/.
     const argvLines = fs.readFileSync(ctx.argvLog, "utf-8").trim().split("\n");
     const codexUsageCalls = argvLines.filter((l) => l.startsWith("usage\t") && l.includes("--agent\tcodex"));
     assert.ok(
       codexUsageCalls.some((l) => l.includes(`CODEX_SESSIONS_DIR=${path.join(validDir, "sessions")}`)),
       `expected a codex usage call with CODEX_SESSIONS_DIR=${path.join(validDir, "sessions")}, got:\n${codexUsageCalls.join("\n")}`,
     );
-    assert.ok(
-      !argvLines.some((l) => l.includes(`CODEX_SESSIONS_DIR=${path.join(invalidDir, "sessions")}`)),
-      "the dir missing sessions/ must be skipped before any agentsview call",
+  } finally {
+    fs.rmSync(extraRoot, { recursive: true, force: true });
+    ctx.cleanup();
+  }
+});
+
+test("a configured EXTRA_CODEX_CONFIGS home missing sessions/ aborts the run with no POST (fail loud)", async () => {
+  // Fail-loud posture: a home the operator explicitly configured but that
+  // can't be collected (here, missing sessions/) must abort before POST, not
+  // be silently omitted from a successful report — the silent-undercount class
+  // that left usage unreported for weeks.
+  const ctx = await setupE2E({
+    dailyJson:
+      '{"daily":[{"date":"2026-05-25","modelBreakdowns":[{"modelName":"gpt-5.5","inputTokens":1000,"outputTokens":100,"cacheCreationTokens":0,"cacheReadTokens":0}]}]}',
+  });
+  const extraRoot = fs.mkdtempSync(path.join(os.tmpdir(), "tkmx-codex-bad-"));
+  const brokenDir = path.join(extraRoot, "codex-account-broken");
+  fs.mkdirSync(brokenDir, { recursive: true }); // no sessions/ subdir
+  try {
+    const result = await runReporter({
+      ...ctx.baseEnv,
+      REPORT_DAYS: "3650",
+      EXTRA_CODEX_CONFIGS: brokenDir,
+    });
+    assert.notEqual(result.status, 0, "reporter must exit non-zero when a configured home can't be collected");
+    assert.equal(ctx.getCaptured(), null, "no POST may be sent when a configured extra home is missing its sessions/ subdir");
+    assert.match(
+      result.stderr,
+      /codex-account-broken.*sessions/i,
+      `expected a fatal error naming the misconfigured home, got stderr:\n${result.stderr}`,
     );
   } finally {
     fs.rmSync(extraRoot, { recursive: true, force: true });
