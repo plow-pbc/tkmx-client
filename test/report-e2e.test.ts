@@ -54,7 +54,7 @@ function runReporter(env: Record<string, string>, timeoutMs = 30000, script: str
 // `usage` subcommand echoes — either a row for the "activity" scenario or
 // `{"daily":[]}` for the inactive scenario. The script also logs its argv
 // to argvLog so tests can inspect the --since windows.
-function writeFakeAgentsview(fakeBin, argvLog, dailyJson) {
+function writeFakeAgentsview(fakeBin, argvLog, dailyJson, failCodexSessionsDir = "") {
   if (process.platform === "win32") {
     fs.writeFileSync(
       fakeBin,
@@ -67,6 +67,10 @@ args[0] = cmd;
 const envCols = ["CODEX_SESSIONS_DIR", "CLAUDE_PROJECTS_DIR", "AGENT_VIEWER_DATA_DIR"].map((k) => k + "=" + (process.env[k] || ""));
 fs.appendFileSync(${JSON.stringify(argvLog)}, args.concat(envCols).join("\\t") + "\\n");
 if (cmd === "usage") {
+  if (${JSON.stringify(failCodexSessionsDir)} && process.env.CODEX_SESSIONS_DIR === ${JSON.stringify(failCodexSessionsDir)}) {
+    process.stderr.write("agentsview: simulated usage failure for " + process.env.CODEX_SESSIONS_DIR + "\\n");
+    process.exit(2);
+  }
   console.log(${JSON.stringify(dailyJson)});
   process.exit(0);
 }
@@ -92,6 +96,10 @@ case "$1" in
     echo "agentsview v0.25.0 (commit abcdef1, built 2026-04-24T00:00:00Z)"
     ;;
   usage)
+    if [ -n '${failCodexSessionsDir}' ] && [ "$CODEX_SESSIONS_DIR" = '${failCodexSessionsDir}' ]; then
+      echo "agentsview: simulated usage failure for $CODEX_SESSIONS_DIR" >&2
+      exit 2
+    fi
     echo '${dailyJson.replace(/'/g, "'\\''")}'
     ;;
   stats)
@@ -116,11 +124,11 @@ esac
 
 // Shared test scaffolding: tmp dir, fake-agentsview, stub server. Returns
 // everything the test needs plus a cleanup fn.
-async function setupE2E({ dailyJson }) {
+async function setupE2E({ dailyJson, failCodexSessionsDir = "" }) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tkmx-e2e-"));
   const argvLog = path.join(tmp, "argv.log");
   const fakeScript = path.join(tmp, process.platform === "win32" ? "fake-agentsview-preload.cjs" : "fake-agentsview");
-  writeFakeAgentsview(fakeScript, argvLog, dailyJson);
+  writeFakeAgentsview(fakeScript, argvLog, dailyJson, failCodexSessionsDir);
   const fakeBin = process.platform === "win32" ? process.execPath : fakeScript;
 
   let captured = null;
@@ -418,36 +426,44 @@ test("EXTRA_CODEX_CONFIGS sums a valid home's codex usage into the POST, scannin
   }
 });
 
-test("a configured EXTRA_CODEX_CONFIGS home missing sessions/ aborts the run with no POST (fail loud)", async () => {
-  // Fail-loud posture: a home the operator explicitly configured but that
-  // can't be collected (here, missing sessions/) must abort before POST, not
-  // be silently omitted from a successful report — the silent-undercount class
-  // that left usage unreported for weeks.
-  const ctx = await setupE2E({
-    dailyJson:
-      '{"daily":[{"date":"2026-05-25","modelBreakdowns":[{"modelName":"gpt-5.5","inputTokens":1000,"outputTokens":100,"cacheCreationTokens":0,"cacheReadTokens":0}]}]}',
-  });
-  const extraRoot = fs.mkdtempSync(path.join(os.tmpdir(), "tkmx-codex-bad-"));
-  const brokenDir = path.join(extraRoot, "codex-account-broken");
-  fs.mkdirSync(brokenDir, { recursive: true }); // no sessions/ subdir
-  try {
-    const result = await runReporter({
-      ...ctx.baseEnv,
-      REPORT_DAYS: "3650",
-      EXTRA_CODEX_CONFIGS: brokenDir,
+// Fail-loud posture: a home the operator explicitly configured but that can't
+// be collected must abort before POST, not be silently omitted from a
+// successful report — the silent-undercount class that left usage unreported
+// for weeks. Both failure triggers exercise distinct branches of
+// collectExtraAgentsviewHomes (missing-subdir throw vs the catch→rethrow when
+// a valid home's agentsview call fails); same guarantee, so one matrix.
+for (const tc of [
+  { name: "missing sessions/ subdir", makeSessions: false, failUsage: false },
+  { name: "agentsview usage call fails for a valid home", makeSessions: true, failUsage: true },
+]) {
+  test(`a configured EXTRA_CODEX_CONFIGS home aborts the run with no POST when it can't be collected — ${tc.name}`, async () => {
+    const extraRoot = fs.mkdtempSync(path.join(os.tmpdir(), "tkmx-codex-bad-"));
+    const home = path.join(extraRoot, "codex-account-broken");
+    fs.mkdirSync(tc.makeSessions ? path.join(home, "sessions") : home, { recursive: true });
+    const ctx = await setupE2E({
+      dailyJson:
+        '{"daily":[{"date":"2026-05-25","modelBreakdowns":[{"modelName":"gpt-5.5","inputTokens":1000,"outputTokens":100,"cacheCreationTokens":0,"cacheReadTokens":0}]}]}',
+      failCodexSessionsDir: tc.failUsage ? path.join(home, "sessions") : "",
     });
-    assert.notEqual(result.status, 0, "reporter must exit non-zero when a configured home can't be collected");
-    assert.equal(ctx.getCaptured(), null, "no POST may be sent when a configured extra home is missing its sessions/ subdir");
-    assert.match(
-      result.stderr,
-      /codex-account-broken.*sessions/i,
-      `expected a fatal error naming the misconfigured home, got stderr:\n${result.stderr}`,
-    );
-  } finally {
-    fs.rmSync(extraRoot, { recursive: true, force: true });
-    ctx.cleanup();
-  }
-});
+    try {
+      const result = await runReporter({
+        ...ctx.baseEnv,
+        REPORT_DAYS: "3650",
+        EXTRA_CODEX_CONFIGS: home,
+      });
+      assert.notEqual(result.status, 0, "reporter must exit non-zero when a configured home can't be collected");
+      assert.equal(ctx.getCaptured(), null, "no POST may be sent when a configured extra home can't be collected");
+      assert.match(
+        result.stderr,
+        /codex-account-broken/i,
+        `expected a fatal error naming the misconfigured home, got stderr:\n${result.stderr}`,
+      );
+    } finally {
+      fs.rmSync(extraRoot, { recursive: true, force: true });
+      ctx.cleanup();
+    }
+  });
+}
 
 test("legacy reporter/report.js compat shim forwards to the compiled reporter", async () => {
   // Pre-TypeScript installs wrote launchd/systemd units pointing at
