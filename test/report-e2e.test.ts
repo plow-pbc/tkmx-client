@@ -367,69 +367,74 @@ test("openclaw rows are present in the POST body when OPENCLAW_SESSIONS_DIRS poi
   }
 });
 
-test("EXTRA_CODEX_CONFIGS sums every configured home's codex usage into the POST, scanning each right home", async () => {
-  // The reviewer's bot Codex accounts live in separate homes
-  // (docker/secrets/codex-account-*), outside the local ~/.codex agentsview
-  // scans by default. EXTRA_CODEX_CONFIGS is a comma-separated list; EACH
-  // valid home's codex usage must sum into the codex source — colliding
-  // (date,model,source) rows must sum, not drop (see mergeDailyUsage). Two
-  // homes here guard against a first-entry-only regression undercounting the
-  // real multi-account use case.
-  const ctx = await setupE2E({
-    dailyJson:
-      '{"daily":[{"date":"2026-05-25","modelBreakdowns":[{"modelName":"gpt-5.5","inputTokens":1000,"outputTokens":100,"cacheCreationTokens":0,"cacheReadTokens":0}]}]}',
-  });
-  const extraRoot = fs.mkdtempSync(path.join(os.tmpdir(), "tkmx-codex-"));
-  const homeA = path.join(extraRoot, "codex-account-a");
-  const homeB = path.join(extraRoot, "codex-account-b");
-  fs.mkdirSync(path.join(homeA, "sessions"), { recursive: true });
-  fs.mkdirSync(path.join(homeB, "sessions"), { recursive: true });
-  try {
-    const result = await runReporter({
-      ...ctx.baseEnv,
-      REPORT_DAYS: "3650", // wide window so the fixture date passes the sinceStr filter
-      EXTRA_CODEX_CONFIGS: `${homeA},${homeB}`,
+// EXTRA_{CLAUDE,CODEX}_CONFIGS are comma-separated home lists routed through
+// the same descriptor map in report.ts. For EACH agent's descriptor, every
+// configured home's usage must sum into THAT agent's source (colliding
+// (date,model,source) rows sum, not drop — see mergeDailyUsage), without
+// bleeding into the other source. Two homes per case guard a first-entry-only
+// undercount (the real multi-account use case); one matrix over both agents
+// guards both descriptors' subdir + env-var wiring against drift.
+for (const tc of [
+  { agent: "codex",  envVar: "EXTRA_CODEX_CONFIGS",  subdir: "sessions", subdirEnvKey: "CODEX_SESSIONS_DIR",  source: "codex",  other: "claude" },
+  { agent: "claude", envVar: "EXTRA_CLAUDE_CONFIGS", subdir: "projects", subdirEnvKey: "CLAUDE_PROJECTS_DIR", source: "claude", other: "codex"  },
+]) {
+  test(`${tc.envVar} sums every configured home's usage into the ${tc.source} source, scanning each right home`, async () => {
+    const ctx = await setupE2E({
+      dailyJson:
+        '{"daily":[{"date":"2026-05-25","modelBreakdowns":[{"modelName":"gpt-5.5","inputTokens":1000,"outputTokens":100,"cacheCreationTokens":0,"cacheReadTokens":0}]}]}',
     });
-    assert.equal(
-      result.status,
-      0,
-      `reporter exited non-zero.\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
-    );
-    const captured = ctx.getCaptured();
-    assert.ok(captured, "server did not capture a POST body");
-
-    const day = (captured as any).data.find((d) => d.date === "2026-05-25");
-    assert.ok(day, `missing 2026-05-25 in POST data: ${JSON.stringify((captured as any).data)}`);
-
-    // Local ~/.codex (1000) + two valid extra homes (1000 each) sum on the same
-    // (date, gpt-5.5, codex) row → 3000; a first-entry-only bug would give 2000.
-    const codexRow = day.modelBreakdowns.find((m) => m.source === "codex" && m.modelName === "gpt-5.5");
-    assert.ok(codexRow, `missing codex gpt-5.5 row: ${JSON.stringify(day.modelBreakdowns)}`);
-    assert.equal(codexRow.inputTokens, 3000, "every configured extra codex home must sum into the codex stream");
-    assert.equal(codexRow.outputTokens, 300);
-    assert.equal(codexRow.totalTokens, 3300);
-
-    // The extra-codex homes must not bleed into the claude source.
-    const claudeRow = day.modelBreakdowns.find((m) => m.source === "claude" && m.modelName === "gpt-5.5");
-    assert.ok(claudeRow, "expected a claude-source row from the local scan");
-    assert.equal(claudeRow.inputTokens, 1000, "extra codex homes must not be counted under claude");
-
-    // The merge total alone can't prove the reporter scanned the *right* homes
-    // (a wrong-path scan that still returned 1000 would also sum). Assert
-    // agentsview was invoked for codex with CODEX_SESSIONS_DIR at BOTH homes.
-    const argvLines = fs.readFileSync(ctx.argvLog, "utf-8").trim().split("\n");
-    const codexUsageCalls = argvLines.filter((l) => l.startsWith("usage\t") && l.includes("--agent\tcodex"));
-    for (const home of [homeA, homeB]) {
-      assert.ok(
-        codexUsageCalls.some((l) => l.includes(`CODEX_SESSIONS_DIR=${path.join(home, "sessions")}`)),
-        `expected a codex usage call with CODEX_SESSIONS_DIR=${path.join(home, "sessions")}, got:\n${codexUsageCalls.join("\n")}`,
+    const extraRoot = fs.mkdtempSync(path.join(os.tmpdir(), `tkmx-${tc.agent}-`));
+    const homeA = path.join(extraRoot, "home-a");
+    const homeB = path.join(extraRoot, "home-b");
+    fs.mkdirSync(path.join(homeA, tc.subdir), { recursive: true });
+    fs.mkdirSync(path.join(homeB, tc.subdir), { recursive: true });
+    try {
+      const result = await runReporter({
+        ...ctx.baseEnv,
+        REPORT_DAYS: "3650", // wide window so the fixture date passes the sinceStr filter
+        [tc.envVar]: `${homeA},${homeB}`,
+      });
+      assert.equal(
+        result.status,
+        0,
+        `reporter exited non-zero.\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
       );
+      const captured = ctx.getCaptured();
+      assert.ok(captured, "server did not capture a POST body");
+
+      const day = (captured as any).data.find((d) => d.date === "2026-05-25");
+      assert.ok(day, `missing 2026-05-25 in POST data: ${JSON.stringify((captured as any).data)}`);
+
+      // Local (1000) + two valid extra homes (1000 each) sum on the same
+      // (date, gpt-5.5, <source>) row → 3000; a first-entry-only bug gives 2000.
+      const row = day.modelBreakdowns.find((m) => m.source === tc.source && m.modelName === "gpt-5.5");
+      assert.ok(row, `missing ${tc.source} gpt-5.5 row: ${JSON.stringify(day.modelBreakdowns)}`);
+      assert.equal(row.inputTokens, 3000, `every configured extra ${tc.agent} home must sum into the ${tc.source} stream`);
+      assert.equal(row.outputTokens, 300);
+      assert.equal(row.totalTokens, 3300);
+
+      // The extra homes must not bleed into the other source (only its local scan).
+      const otherRow = day.modelBreakdowns.find((m) => m.source === tc.other && m.modelName === "gpt-5.5");
+      assert.ok(otherRow, `expected a ${tc.other}-source row from the local scan`);
+      assert.equal(otherRow.inputTokens, 1000, `extra ${tc.agent} homes must not be counted under ${tc.other}`);
+
+      // The merge total alone can't prove the reporter scanned the *right* homes
+      // (a wrong-path scan that still returned 1000 would also sum). Assert
+      // agentsview was invoked for this agent with its env key at BOTH homes.
+      const argvLines = fs.readFileSync(ctx.argvLog, "utf-8").trim().split("\n");
+      const usageCalls = argvLines.filter((l) => l.startsWith("usage\t") && l.includes(`--agent\t${tc.agent}`));
+      for (const home of [homeA, homeB]) {
+        assert.ok(
+          usageCalls.some((l) => l.includes(`${tc.subdirEnvKey}=${path.join(home, tc.subdir)}`)),
+          `expected a ${tc.agent} usage call with ${tc.subdirEnvKey}=${path.join(home, tc.subdir)}, got:\n${usageCalls.join("\n")}`,
+        );
+      }
+    } finally {
+      fs.rmSync(extraRoot, { recursive: true, force: true });
+      ctx.cleanup();
     }
-  } finally {
-    fs.rmSync(extraRoot, { recursive: true, force: true });
-    ctx.cleanup();
-  }
-});
+  });
+}
 
 // Fail-loud posture: a home the operator explicitly configured but that can't
 // be collected must abort before POST, not be silently omitted from a
