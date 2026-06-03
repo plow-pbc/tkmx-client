@@ -367,24 +367,28 @@ test("openclaw rows are present in the POST body when OPENCLAW_SESSIONS_DIRS poi
   }
 });
 
-test("EXTRA_CODEX_CONFIGS sums a valid home's codex usage into the POST, scanning the right home", async () => {
+test("EXTRA_CODEX_CONFIGS sums every configured home's codex usage into the POST, scanning each right home", async () => {
   // The reviewer's bot Codex accounts live in separate homes
   // (docker/secrets/codex-account-*), outside the local ~/.codex agentsview
-  // scans by default. EXTRA_CODEX_CONFIGS points the reporter at those homes;
-  // each valid entry's codex usage must sum into the codex source stream
-  // (server PK is (user,date,model,client_id) — colliding rows must sum, not drop).
+  // scans by default. EXTRA_CODEX_CONFIGS is a comma-separated list; EACH
+  // valid home's codex usage must sum into the codex source — colliding
+  // (date,model,source) rows must sum, not drop (see mergeDailyUsage). Two
+  // homes here guard against a first-entry-only regression undercounting the
+  // real multi-account use case.
   const ctx = await setupE2E({
     dailyJson:
       '{"daily":[{"date":"2026-05-25","modelBreakdowns":[{"modelName":"gpt-5.5","inputTokens":1000,"outputTokens":100,"cacheCreationTokens":0,"cacheReadTokens":0}]}]}',
   });
   const extraRoot = fs.mkdtempSync(path.join(os.tmpdir(), "tkmx-codex-"));
-  const validDir = path.join(extraRoot, "codex-account-a");
-  fs.mkdirSync(path.join(validDir, "sessions"), { recursive: true });
+  const homeA = path.join(extraRoot, "codex-account-a");
+  const homeB = path.join(extraRoot, "codex-account-b");
+  fs.mkdirSync(path.join(homeA, "sessions"), { recursive: true });
+  fs.mkdirSync(path.join(homeB, "sessions"), { recursive: true });
   try {
     const result = await runReporter({
       ...ctx.baseEnv,
       REPORT_DAYS: "3650", // wide window so the fixture date passes the sinceStr filter
-      EXTRA_CODEX_CONFIGS: validDir,
+      EXTRA_CODEX_CONFIGS: `${homeA},${homeB}`,
     });
     assert.equal(
       result.status,
@@ -397,29 +401,30 @@ test("EXTRA_CODEX_CONFIGS sums a valid home's codex usage into the POST, scannin
     const day = (captured as any).data.find((d) => d.date === "2026-05-25");
     assert.ok(day, `missing 2026-05-25 in POST data: ${JSON.stringify((captured as any).data)}`);
 
-    // Local ~/.codex (1000) + the valid extra home (1000) sum on the same
-    // (date, gpt-5.5, codex) row.
+    // Local ~/.codex (1000) + two valid extra homes (1000 each) sum on the same
+    // (date, gpt-5.5, codex) row → 3000; a first-entry-only bug would give 2000.
     const codexRow = day.modelBreakdowns.find((m) => m.source === "codex" && m.modelName === "gpt-5.5");
     assert.ok(codexRow, `missing codex gpt-5.5 row: ${JSON.stringify(day.modelBreakdowns)}`);
-    assert.equal(codexRow.inputTokens, 2000, "valid extra codex home must sum into the codex stream");
-    assert.equal(codexRow.outputTokens, 200);
-    assert.equal(codexRow.totalTokens, 2200);
+    assert.equal(codexRow.inputTokens, 3000, "every configured extra codex home must sum into the codex stream");
+    assert.equal(codexRow.outputTokens, 300);
+    assert.equal(codexRow.totalTokens, 3300);
 
-    // The extra-codex home must not bleed into the claude source.
+    // The extra-codex homes must not bleed into the claude source.
     const claudeRow = day.modelBreakdowns.find((m) => m.source === "claude" && m.modelName === "gpt-5.5");
     assert.ok(claudeRow, "expected a claude-source row from the local scan");
-    assert.equal(claudeRow.inputTokens, 1000, "extra codex home must not be counted under claude");
+    assert.equal(claudeRow.inputTokens, 1000, "extra codex homes must not be counted under claude");
 
-    // The merge total alone can't prove the reporter scanned the *right* home
-    // (a wrong-path scan that still returned 1000 would also sum to 2000).
-    // Assert agentsview was invoked for codex with CODEX_SESSIONS_DIR pointing
-    // at the valid home's sessions/.
+    // The merge total alone can't prove the reporter scanned the *right* homes
+    // (a wrong-path scan that still returned 1000 would also sum). Assert
+    // agentsview was invoked for codex with CODEX_SESSIONS_DIR at BOTH homes.
     const argvLines = fs.readFileSync(ctx.argvLog, "utf-8").trim().split("\n");
     const codexUsageCalls = argvLines.filter((l) => l.startsWith("usage\t") && l.includes("--agent\tcodex"));
-    assert.ok(
-      codexUsageCalls.some((l) => l.includes(`CODEX_SESSIONS_DIR=${path.join(validDir, "sessions")}`)),
-      `expected a codex usage call with CODEX_SESSIONS_DIR=${path.join(validDir, "sessions")}, got:\n${codexUsageCalls.join("\n")}`,
-    );
+    for (const home of [homeA, homeB]) {
+      assert.ok(
+        codexUsageCalls.some((l) => l.includes(`CODEX_SESSIONS_DIR=${path.join(home, "sessions")}`)),
+        `expected a codex usage call with CODEX_SESSIONS_DIR=${path.join(home, "sessions")}, got:\n${codexUsageCalls.join("\n")}`,
+      );
+    }
   } finally {
     fs.rmSync(extraRoot, { recursive: true, force: true });
     ctx.cleanup();
@@ -433,8 +438,8 @@ test("EXTRA_CODEX_CONFIGS sums a valid home's codex usage into the POST, scannin
 // collectExtraAgentsviewHomes (missing-subdir throw vs the catch→rethrow when
 // a valid home's agentsview call fails); same guarantee, so one matrix.
 for (const tc of [
-  { name: "missing sessions/ subdir", makeSessions: false, failUsage: false },
-  { name: "agentsview usage call fails for a valid home", makeSessions: true, failUsage: true },
+  { name: "missing sessions/ subdir", makeSessions: false, failUsage: false, expectStderr: /missing sessions\/ subdir/i },
+  { name: "agentsview usage call fails for a valid home", makeSessions: true, failUsage: true, expectStderr: /usage collection failed/i },
 ]) {
   test(`a configured EXTRA_CODEX_CONFIGS home aborts the run with no POST when it can't be collected — ${tc.name}`, async () => {
     const extraRoot = fs.mkdtempSync(path.join(os.tmpdir(), "tkmx-codex-bad-"));
@@ -453,11 +458,8 @@ for (const tc of [
       });
       assert.notEqual(result.status, 0, "reporter must exit non-zero when a configured home can't be collected");
       assert.equal(ctx.getCaptured(), null, "no POST may be sent when a configured extra home can't be collected");
-      assert.match(
-        result.stderr,
-        /codex-account-broken/i,
-        `expected a fatal error naming the misconfigured home, got stderr:\n${result.stderr}`,
-      );
+      assert.match(result.stderr, /codex-account-broken/i, `expected a fatal error naming the home, got stderr:\n${result.stderr}`);
+      assert.match(result.stderr, tc.expectStderr, `expected the ${tc.name} branch's error message, got stderr:\n${result.stderr}`);
     } finally {
       fs.rmSync(extraRoot, { recursive: true, force: true });
       ctx.cleanup();

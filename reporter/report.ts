@@ -284,9 +284,10 @@ async function main(): Promise<void> {
   console.log(`  Codex (local): ${localCodexDaily.length} days`);
 
   // Extra homes outside the local scan, folded into their matching source so
-  // mergeDailyUsage sums same-(model,source,date) rows rather than colliding on
-  // the server's (user,date,model,client_id) PK. Codex homes (e.g. the reviewer
-  // bot's per-account ~/.codex) report under "codex" alongside the local scan.
+  // mergeDailyUsage sums same-(date,model,source) rows before POST (see merge.ts
+  // for the canonical dedup/summing contract) rather than letting them collide
+  // on the server upsert. Codex homes (e.g. the reviewer bot's per-account
+  // ~/.codex) report under "codex" alongside the local scan.
   const claudeDaily = localClaudeDaily.concat(
     collectExtraAgentsviewHomes(agentsviewBin, sinceStr, EXTRA_CLAUDE_CONFIGS, {
       agent: "claude", subdir: "projects", subdirEnvKey: "CLAUDE_PROJECTS_DIR", label: "Claude",
