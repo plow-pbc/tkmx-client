@@ -288,16 +288,10 @@ async function main(): Promise<void> {
   // for the canonical dedup/summing contract) rather than letting them collide
   // on the server upsert. Codex homes (e.g. the reviewer bot's per-account
   // ~/.codex) report under "codex" alongside the local scan.
-  const claudeDaily = localClaudeDaily.concat(
-    collectExtraAgentsviewHomes(agentsviewBin, sinceStr, EXTRA_CLAUDE_CONFIGS, {
-      agent: "claude", subdir: "projects", subdirEnvKey: "CLAUDE_PROJECTS_DIR", label: "Claude",
-    }),
-  );
-  const allCodexDaily = localCodexDaily.concat(
-    collectExtraAgentsviewHomes(agentsviewBin, sinceStr, EXTRA_CODEX_CONFIGS, {
-      agent: "codex", subdir: "sessions", subdirEnvKey: "CODEX_SESSIONS_DIR", label: "Codex",
-    }),
-  );
+  const [claudeDaily, allCodexDaily] = [
+    { local: localClaudeDaily, raw: EXTRA_CLAUDE_CONFIGS, agent: "claude", subdir: "projects", subdirEnvKey: "CLAUDE_PROJECTS_DIR", label: "Claude" },
+    { local: localCodexDaily,  raw: EXTRA_CODEX_CONFIGS,  agent: "codex",  subdir: "sessions",  subdirEnvKey: "CODEX_SESSIONS_DIR", label: "Codex" },
+  ].map((s) => s.local.concat(collectExtraAgentsviewHomes(agentsviewBin, sinceStr, s.raw, s)));
 
   const openaiDaily = await collectOpenAIUsage(sinceStr);
   if (openaiDaily.length > 0) {
