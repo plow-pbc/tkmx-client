@@ -115,7 +115,16 @@ function collectMachineConfig(): MachineConfig | null {
 
   const cfg: MachineConfig = { hostname: os.hostname(), os: os.platform() + " " + os.release(), cpu: "", memory_gb: Math.round(os.totalmem() / 1e9) };
   const cpus = os.cpus();
-  if (cpus.length > 0) cfg.cpu = cpus[0].model.trim() + " (" + cpus.length + " cores)";
+  if (cpus.length > 0) {
+    // Some virtualized kernels (e.g. Docker Desktop's linuxkit on Apple Silicon,
+    // many ARM guests) report os.cpus()[0].model as the literal string "unknown"
+    // or empty. The profile "Machines" card renders the cpu field as the machine's
+    // primary label, so such nodes show up as "unknown (N cores)" with no way to
+    // tell them apart. Fall back to the hostname so the machine stays identifiable.
+    const model = cpus[0].model.trim();
+    const label = model && model.toLowerCase() !== "unknown" ? model : os.hostname();
+    cfg.cpu = label + " (" + cpus.length + " cores)";
+  }
   try { cfg.codex_version = execFileSync("codex", ["--version"], { encoding: "utf-8", timeout: 5000 }).trim(); } catch {}
   const skills = collectClaudeSkills();
   if (skills.length > 0) cfg.claude_skills = skills;
