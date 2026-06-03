@@ -64,7 +64,8 @@ const args = process.argv.slice(1);
 const cmd = path.basename(args[0] || "");
 if (cmd !== "usage" && cmd !== "stats") return;
 args[0] = cmd;
-fs.appendFileSync(${JSON.stringify(argvLog)}, args.join("\\t") + "\\n");
+const envCols = ["CODEX_SESSIONS_DIR", "CLAUDE_PROJECTS_DIR", "AGENT_VIEWER_DATA_DIR"].map((k) => k + "=" + (process.env[k] || ""));
+fs.appendFileSync(${JSON.stringify(argvLog)}, args.concat(envCols).join("\\t") + "\\n");
 if (cmd === "usage") {
   console.log(${JSON.stringify(dailyJson)});
   process.exit(0);
@@ -84,6 +85,7 @@ process.exit(0);
     fakeBin,
     `#!/usr/bin/env bash
 printf '%s\\t' "$@" >> "${argvLog}"
+printf 'CODEX_SESSIONS_DIR=%s\\tCLAUDE_PROJECTS_DIR=%s\\tAGENT_VIEWER_DATA_DIR=%s\\t' "$CODEX_SESSIONS_DIR" "$CLAUDE_PROJECTS_DIR" "$AGENT_VIEWER_DATA_DIR" >> "${argvLog}"
 printf '\\n' >> "${argvLog}"
 case "$1" in
   --version)
@@ -407,6 +409,21 @@ test("EXTRA_CODEX_CONFIGS folds each valid sessions/ dir's codex usage into the 
       result.stderr,
       /codex-account-broken.*sessions/i,
       `expected a skip note naming the dir missing sessions/, got stderr:\n${result.stderr}`,
+    );
+
+    // The merge total alone can't prove the reporter scanned the *right* home
+    // (a wrong-path scan that still returned 1000 would also sum to 2000).
+    // Assert agentsview was invoked for codex with CODEX_SESSIONS_DIR pointing
+    // at the valid home's sessions/ — and never at the skipped invalid dir.
+    const argvLines = fs.readFileSync(ctx.argvLog, "utf-8").trim().split("\n");
+    const codexUsageCalls = argvLines.filter((l) => l.startsWith("usage\t") && l.includes("--agent\tcodex"));
+    assert.ok(
+      codexUsageCalls.some((l) => l.includes(`CODEX_SESSIONS_DIR=${path.join(validDir, "sessions")}`)),
+      `expected a codex usage call with CODEX_SESSIONS_DIR=${path.join(validDir, "sessions")}, got:\n${codexUsageCalls.join("\n")}`,
+    );
+    assert.ok(
+      !argvLines.some((l) => l.includes(`CODEX_SESSIONS_DIR=${path.join(invalidDir, "sessions")}`)),
+      "the dir missing sessions/ must be skipped before any agentsview call",
     );
   } finally {
     fs.rmSync(extraRoot, { recursive: true, force: true });

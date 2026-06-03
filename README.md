@@ -163,7 +163,7 @@ If you're updating an existing install, refer to the config table above and add 
 
 > **⚠️ BREAKING in v1.3.0:** agentsview is now a **hard dependency**. If you don't have it installed, `npm run report` will exit with an install-or-pin message on first run. This is technically a breaking change under SemVer — we kept it as a minor bump because the user pool is small, the fix is a one-line install, and the pin path to `v1.2.0` is explicit and supported.
 
-v1.3.0 replaces `ccusage` + the direct codex sqlite reader with [agentsview](https://www.agentsview.io/token-usage/) for all local Claude and Codex token collection. `EXTRA_CLAUDE_CONFIGS` — the feature for aggregating usage from synced remote `~/.claude` directories — also goes through agentsview (it creates a per-config-dir sqlite under `~/.agentsview-tkmx/<hash>/` for isolated incremental sync).
+v1.3.0 replaces `ccusage` + the direct codex sqlite reader with [agentsview](https://www.agentsview.io/token-usage/) for all local Claude and Codex token collection. `EXTRA_CLAUDE_CONFIGS` / `EXTRA_CODEX_CONFIGS` — the features for aggregating usage from extra `~/.claude` / `~/.codex` homes — also go through agentsview (each creates a per-home sqlite under `~/.agentsview-tkmx/<hash>/` for isolated incremental sync).
 
 ### Why upgrade?
 
@@ -215,6 +215,12 @@ EXTRA_CLAUDE_CONFIGS=/path/to/synced-laptop,/path/to/synced-desktop
 ```
 
 The reporter runs `agentsview` once per directory (each with its own `AGENT_VIEWER_DATA_DIR` under `~/.agentsview-tkmx/<hash>/` and `CLAUDE_PROJECTS_DIR` pointing at `<dir>/projects`) and merges the results with the local machine's usage before submitting. Each remote mirror gets its own incrementally-synced sqlite, so re-runs are cheap.
+
+The Codex equivalent is `EXTRA_CODEX_CONFIGS` — a comma-separated list of Codex homes, each containing a `sessions/` subdirectory (the `~/.codex` layout). Use it to fold in Codex accounts whose data lives outside the local `~/.codex`, e.g. a reviewer bot's per-account homes. It works the same way (one `agentsview` run per home, isolated `AGENT_VIEWER_DATA_DIR`, `CODEX_SESSIONS_DIR` pointing at `<home>/sessions`) and its usage sums into the `codex` source. A home missing `sessions/` is skipped; any other collection failure aborts the run rather than POSTing a silent partial.
+
+```
+EXTRA_CODEX_CONFIGS=/path/to/codex-account-a,/path/to/codex-account-b
+```
 
 ## OpenAI Platform Usage
 
@@ -355,7 +361,7 @@ You don't need to worry about pricing — the server handles it.
 
 [`agentsview`](https://www.agentsview.io/token-usage/) is the required local usage collector. It maintains its own sqlite database synced from `~/.claude` and `~/.codex`, and the reporter queries it via `agentsview usage daily --json --breakdown --agent <claude|codex>`. On large histories this is dramatically faster than walking every JSONL transcript — the sync is incremental and queries hit an indexed database.
 
-When `EXTRA_CLAUDE_CONFIGS` is set, the reporter runs one agentsview invocation per remote dir, each with its own `AGENT_VIEWER_DATA_DIR` (under `~/.agentsview-tkmx/<hash>/`) and `CLAUDE_PROJECTS_DIR` (pointing at the remote `.claude/projects`). This keeps each remote mirror in its own isolated sqlite — incremental sync works per-dir and the local machine's `~/.agentsview/sessions.db` stays clean.
+When `EXTRA_CLAUDE_CONFIGS` (or `EXTRA_CODEX_CONFIGS`) is set, the reporter runs one agentsview invocation per extra home, each with its own `AGENT_VIEWER_DATA_DIR` (under `~/.agentsview-tkmx/<hash>/`) and the matching source dir env — `CLAUDE_PROJECTS_DIR` (`<home>/projects`) for Claude, `CODEX_SESSIONS_DIR` (`<home>/sessions`) for Codex. This keeps each home in its own isolated sqlite — incremental sync works per-home and the local machine's `~/.agentsview/sessions.db` stays clean.
 
 The reporter merges daily token-usage rows from all enabled sources (Claude, Codex, OpenAI platform, OpenClaw) client-side into `body.data` and POSTs them to the Tokenmaxxing server. Cursor stats and session stats ship in separate body fields (`cursor_stats`, `session_stats`) — they are wholesale-replaced rolling-window blobs, not per-day token rows. Each report replaces previous data for the same machine and date range, so re-syncs are safe and idempotent.
 

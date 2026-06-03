@@ -217,21 +217,13 @@ export function collectAgentsviewUsage(bin: string, sinceStr: string, timeoutMs:
   return { claudeDaily, codexDaily };
 }
 
-// Single-agent (Claude) collection against an isolated agentsview data
-// dir + projects dir. Used for EXTRA_CLAUDE_CONFIGS entries where we
-// want per-remote-dir incremental sync without contaminating the local
-// machine's ~/.agentsview/sessions.db.
-export function collectAgentsviewClaudeOnly(bin: string, sinceStr: string, env: Record<string, string>, timeoutMs: number = 180000): DailyUsage[] {
+// Single-agent collection against an isolated agentsview data dir. Used for
+// EXTRA_{CLAUDE,CODEX}_CONFIGS extra homes — a synced remote ~/.claude or a
+// separate ~/.codex (e.g. a reviewer bot's per-account home) that lives outside
+// the local scan — so per-home incremental sync can't contaminate the local
+// machine's ~/.agentsview/sessions.db. The caller passes the home's data dir
+// and source dir via env (AGENT_VIEWER_DATA_DIR + CLAUDE_PROJECTS_DIR / CODEX_SESSIONS_DIR).
+export function collectAgentsviewAgentOnly(bin: string, sinceStr: string, agent: string, env: Record<string, string>, timeoutMs: number = 180000): DailyUsage[] {
   const since = toIsoDate(sinceStr);
-  return queryAgent(bin, since, "claude", false, timeoutMs, env);
-}
-
-// Single-agent (Codex) collection against an isolated agentsview data dir +
-// codex sessions dir. Used for EXTRA_CODEX_CONFIGS entries — e.g. the reviewer
-// bot's per-account ~/.codex homes that live outside the local ~/.codex
-// agentsview scans by default — without contaminating the local machine's
-// ~/.agentsview/sessions.db.
-export function collectAgentsviewCodexOnly(bin: string, sinceStr: string, env: Record<string, string>, timeoutMs: number = 180000): DailyUsage[] {
-  const since = toIsoDate(sinceStr);
-  return queryAgent(bin, since, "codex", false, timeoutMs, env);
+  return queryAgent(bin, since, agent, false, timeoutMs, env);
 }

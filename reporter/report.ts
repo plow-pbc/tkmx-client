@@ -7,8 +7,7 @@ import * as http from "node:http";
 import * as https from "node:https";
 import {
   collectAgentsviewUsage,
-  collectAgentsviewClaudeOnly,
-  collectAgentsviewCodexOnly,
+  collectAgentsviewAgentOnly,
   resolveAgentsview,
   detectAgentsviewVersion,
 } from "./agentsview";
@@ -100,6 +99,47 @@ function parseExtraConfigs(raw: string): string[] {
 function agentsviewDataDirFor(absConfigDir: string): string {
   const hash = crypto.createHash("sha256").update(absConfigDir).digest("hex").slice(0, 16);
   return path.join(os.homedir(), ".agentsview-tkmx", hash);
+}
+
+// Collect usage from extra agentsview homes beyond the local scan — synced
+// remote ~/.claude dirs (EXTRA_CLAUDE_CONFIGS) or separate ~/.codex homes
+// (EXTRA_CODEX_CONFIGS, e.g. reviewer bot accounts). Each entry is a home dir
+// containing `subdir` (projects/ for claude, sessions/ for codex); its usage is
+// synced into an isolated data dir (so it can't contaminate the local
+// sessions.db) and returned for the caller to fold into the matching source.
+// A home missing `subdir` is skipped — it isn't a valid home for this agent —
+// but any other collection failure is fatal: a run must never POST a silently
+// partial total as success (the original cause of weeks of unreported usage).
+function collectExtraAgentsviewHomes(
+  bin: string,
+  sinceStr: string,
+  raw: string,
+  opts: { agent: string; subdir: string; subdirEnvKey: string; label: string },
+): DailyUsage[] {
+  let daily: DailyUsage[] = [];
+  for (const entry of parseExtraConfigs(raw)) {
+    const absEntry = path.resolve(entry);
+    const name = path.basename(absEntry) || absEntry;
+    const subdirPath = path.join(absEntry, opts.subdir);
+    if (!fs.existsSync(subdirPath)) {
+      console.error(`  ${opts.label} (${name}) skipped: missing ${opts.subdir}/ subdir at ${absEntry}`);
+      continue;
+    }
+    const dataDir = agentsviewDataDirFor(absEntry);
+    fs.mkdirSync(dataDir, { recursive: true });
+    let homeDaily: DailyUsage[];
+    try {
+      homeDaily = collectAgentsviewAgentOnly(bin, sinceStr, opts.agent, {
+        AGENT_VIEWER_DATA_DIR: dataDir,
+        [opts.subdirEnvKey]: subdirPath,
+      });
+    } catch (err) {
+      throw new Error(`${opts.label} (${name}) usage collection failed: ${errMessage(err)}`);
+    }
+    console.log(`  ${opts.label} (${name}): ${homeDaily.length} days`);
+    daily = daily.concat(homeDaily);
+  }
+  return daily;
 }
 
 interface MachineConfig {
@@ -239,64 +279,24 @@ async function main(): Promise<void> {
   const agentsviewVersion = detectAgentsviewVersion(agentsviewBin);
   if (agentsviewVersion) console.log(`  agentsview version: ${agentsviewVersion}`);
 
-  const { claudeDaily: localClaudeDaily, codexDaily } = collectAgentsviewUsage(agentsviewBin, sinceStr);
+  const { claudeDaily: localClaudeDaily, codexDaily: localCodexDaily } = collectAgentsviewUsage(agentsviewBin, sinceStr);
   console.log(`  Claude (local): ${localClaudeDaily.length} days`);
-  console.log(`  Codex (local): ${codexDaily.length} days`);
+  console.log(`  Codex (local): ${localCodexDaily.length} days`);
 
-  let claudeDaily: DailyUsage[] = [...localClaudeDaily];
-  for (const entry of parseExtraConfigs(EXTRA_CLAUDE_CONFIGS)) {
-    const absEntry = path.resolve(entry);
-    const label = path.basename(absEntry) || absEntry;
-    const projectsDir = path.join(absEntry, "projects");
-    if (!fs.existsSync(projectsDir)) {
-      console.error(`  Claude (${label}) skipped: missing projects/ subdir at ${absEntry}`);
-      continue;
-    }
-    const dataDir = agentsviewDataDirFor(absEntry);
-    let remoteDaily: DailyUsage[];
-    try {
-      fs.mkdirSync(dataDir, { recursive: true });
-      remoteDaily = collectAgentsviewClaudeOnly(agentsviewBin, sinceStr, {
-        AGENT_VIEWER_DATA_DIR: dataDir,
-        CLAUDE_PROJECTS_DIR: projectsDir,
-      });
-    } catch (err) {
-      console.error(`  Claude (${label}) failed: ${errMessage(err)}`);
-      continue;
-    }
-    console.log(`  Claude (${label}): ${remoteDaily.length} days`);
-    claudeDaily = claudeDaily.concat(remoteDaily);
-  }
-
-  // Codex homes outside the local ~/.codex (e.g. the reviewer bot's per-account
-  // docker/secrets/codex-account-* homes). Each entry is a codex home whose
-  // sessions/ subdir agentsview parses via CODEX_SESSIONS_DIR; results fold into
-  // codexDaily so mergeDailyUsage sums same-(model,codex,date) rows across
-  // accounts rather than colliding on the server's PK.
-  let allCodexDaily: DailyUsage[] = [...codexDaily];
-  for (const entry of parseExtraConfigs(EXTRA_CODEX_CONFIGS)) {
-    const absEntry = path.resolve(entry);
-    const label = path.basename(absEntry) || absEntry;
-    const sessionsDir = path.join(absEntry, "sessions");
-    if (!fs.existsSync(sessionsDir)) {
-      console.error(`  Codex (${label}) skipped: missing sessions/ subdir at ${absEntry}`);
-      continue;
-    }
-    const dataDir = agentsviewDataDirFor(absEntry);
-    let remoteDaily: DailyUsage[];
-    try {
-      fs.mkdirSync(dataDir, { recursive: true });
-      remoteDaily = collectAgentsviewCodexOnly(agentsviewBin, sinceStr, {
-        AGENT_VIEWER_DATA_DIR: dataDir,
-        CODEX_SESSIONS_DIR: sessionsDir,
-      });
-    } catch (err) {
-      console.error(`  Codex (${label}) failed: ${errMessage(err)}`);
-      continue;
-    }
-    console.log(`  Codex (${label}): ${remoteDaily.length} days`);
-    allCodexDaily = allCodexDaily.concat(remoteDaily);
-  }
+  // Extra homes outside the local scan, folded into their matching source so
+  // mergeDailyUsage sums same-(model,source,date) rows rather than colliding on
+  // the server's (user,date,model,client_id) PK. Codex homes (e.g. the reviewer
+  // bot's per-account ~/.codex) report under "codex" alongside the local scan.
+  const claudeDaily = localClaudeDaily.concat(
+    collectExtraAgentsviewHomes(agentsviewBin, sinceStr, EXTRA_CLAUDE_CONFIGS, {
+      agent: "claude", subdir: "projects", subdirEnvKey: "CLAUDE_PROJECTS_DIR", label: "Claude",
+    }),
+  );
+  const allCodexDaily = localCodexDaily.concat(
+    collectExtraAgentsviewHomes(agentsviewBin, sinceStr, EXTRA_CODEX_CONFIGS, {
+      agent: "codex", subdir: "sessions", subdirEnvKey: "CODEX_SESSIONS_DIR", label: "Codex",
+    }),
+  );
 
   const openaiDaily = await collectOpenAIUsage(sinceStr);
   if (openaiDaily.length > 0) {
