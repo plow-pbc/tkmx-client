@@ -13,10 +13,16 @@ default:
 # message (hence no --silent, which muted exactly that); the exit code only has
 # to answer "did the suite get to run?".
 #
-# Setup is deliberately one stage: splitting install from compile needs
-# `npm ci --ignore-scripts`, because otherwise the root `prepare` hook compiles
-# during install — and that flag also skips better-sqlite3's install script,
-# leaving no native binding for the suite to open a Database with.
+# Setup is deliberately one stage, compile included: splitting install from
+# compile needs `npm ci --ignore-scripts`, because otherwise the root `prepare`
+# hook compiles during install — and that flag also skips better-sqlite3's
+# install script, leaving no native binding for the suite to open a Database
+# with. So exit 2 covers a broken build too, including a TypeScript error in a
+# test file. It means "no test result", never "not your fault".
+#
+# prepare compiling during install also makes test:setup's src build redundant
+# on this path. It stays: half a second, against keeping one stage list that
+# `npm test` and `just test` both call.
 #
 # Deps always sync from the lockfile so the gate fails on code, not on a stale
 # node_modules that pre-dates a new dependency.
