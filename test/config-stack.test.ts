@@ -53,10 +53,15 @@ describe("config-stack", () => {
   });
 
   describe("collectEnvironment", () => {
-    it("returns shell and basic env info", () => {
-      const result = collectEnvironment();
-      assert.equal(typeof result.shell, "string");
-      assert.ok(result.shell.length > 0);
+    it("reports the shell as a bare name, not the full path", () => {
+      const origShell = process.env.SHELL;
+      process.env.SHELL = "/usr/bin/fish";
+      try {
+        assert.equal(collectEnvironment().shell, "fish");
+      } finally {
+        if (origShell === undefined) delete process.env.SHELL;
+        else process.env.SHELL = origShell;
+      }
     });
 
     it("never includes HOME or sensitive env vars", () => {
