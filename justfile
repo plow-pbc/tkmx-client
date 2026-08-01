@@ -10,6 +10,12 @@ default:
 # Without this every failure was a bare exit 1, so an unreachable registry read
 # identically to a broken build. The failing npm/tsc output above the message
 # says which part of setup died; the code only has to answer "real red?".
+#
+# Setup is one stage on purpose. Splitting install from compile needs
+# `npm ci --ignore-scripts` (otherwise the root `prepare` hook compiles during
+# install), and that skips better-sqlite3's install script too, leaving no
+# native binding — the suite then dies at the first `new Database()`.
+#
 # Deps always sync from the lockfile so the gate fails on code, not on a stale
 # node_modules that pre-dates a new dependency.
 test:

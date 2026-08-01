@@ -8,20 +8,40 @@ const PACKAGE_JSON = JSON.parse(
 ) as { scripts?: Record<string, string> };
 
 const BUILD_SCRIPT_NAMES = ["build", "build:tests"] as const;
+const STAGE_SCRIPT_NAMES = [...BUILD_SCRIPT_NAMES, "test:run"] as const;
 const POSIX_ONLY_FS_COMMAND = /(^|&&\s*|\|\|\s*|;\s*)(rm|cp)\s+/;
 
-// `just test` runs setup and the suite separately so it can give a setup
-// failure its own exit code. That split only stays honest if plain `npm test`
-// still does the whole thing, so nobody running it directly skips a compile.
-test("npm test composes every stage, so the staged `just test` can't drift from it", () => {
-  const script = PACKAGE_JSON.scripts?.test ?? "";
+/** The indented body of a just recipe, e.g. everything under `test:`. */
+function recipeBody(name: string): string {
+  const lines = fs
+    .readFileSync(path.join(__dirname, "..", "..", "justfile"), "utf-8")
+    .split("\n");
+  const start = lines.findIndex((line) => line.startsWith(`${name}:`));
+  assert.notEqual(start, -1, `justfile should define a ${name} recipe`);
 
-  for (const stage of [...BUILD_SCRIPT_NAMES, "test:run"]) {
-    assert.match(
-      script,
-      new RegExp(`npm run ${stage}(\\s|$)`),
-      `npm test should delegate to the ${stage} script rather than inlining or skipping it`,
-    );
+  const body = lines.slice(start + 1);
+  const end = body.findIndex((line) => line.trim() !== "" && !/^\s/.test(line));
+  return (end === -1 ? body : body.slice(0, end)).join("\n");
+}
+
+// `just test` splits these stages apart to give each its own exit code. Both
+// entry points have to keep running all of them: drop one from the justfile and
+// the suite runs against stale compiled output, drop one from `npm test` and
+// anyone invoking npm directly skips a compile. Neither failure is loud.
+test("every build stage runs under both `npm test` and `just test`", () => {
+  const surfaces = {
+    "npm test": PACKAGE_JSON.scripts?.test ?? "",
+    "just test": recipeBody("test"),
+  };
+
+  for (const [surface, body] of Object.entries(surfaces)) {
+    for (const stage of STAGE_SCRIPT_NAMES) {
+      assert.match(
+        body,
+        new RegExp(`npm run ${stage}(\\s|$)`),
+        `${surface} should run the ${stage} script rather than inlining or skipping it`,
+      );
+    }
   }
 });
 
