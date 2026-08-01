@@ -43,6 +43,15 @@ test("both entry points run setup then the suite", () => {
       `${surface} should compile in test:setup before test:run executes the suite`,
     );
   }
+
+  // just aborts a recipe on the first failing line, so ordering is enough there.
+  // An npm script is one shell command: without && a failed compile falls
+  // through and the suite runs on stale dist, green.
+  assert.match(
+    PACKAGE_JSON.scripts?.test ?? "",
+    /npm run test:setup\s*&&\s*npm run test:run/,
+    "npm test should chain the stages with && so a failed compile stops the run",
+  );
 });
 
 test("build npm scripts avoid POSIX-only filesystem commands", () => {
