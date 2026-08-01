@@ -10,16 +10,39 @@ const PACKAGE_JSON = JSON.parse(
 const BUILD_SCRIPT_NAMES = ["build", "build:tests"] as const;
 const POSIX_ONLY_FS_COMMAND = /(^|&&\s*|\|\|\s*|;\s*)(rm|cp)\s+/;
 
-// `just test` runs test:setup and test:run as separate steps so it can give a
-// setup failure its own exit code. Those two scripts own the stage list, so the
-// justfile can't drift from `npm test` — as long as npm test keeps composing
-// both. Inline a stage here instead and the two entry points diverge silently.
-test("npm test composes the same setup and run scripts the justfile calls", () => {
-  assert.match(
-    PACKAGE_JSON.scripts?.test ?? "",
-    /npm run test:setup\s*&&\s*npm run test:run/,
-    "npm test should delegate to test:setup and test:run rather than inlining the stages",
+/** Body of the justfile's `test:` recipe, up to the next unindented line. */
+function justTestRecipe(): string {
+  const justfile = fs.readFileSync(
+    path.join(__dirname, "..", "..", "justfile"),
+    "utf-8",
   );
+  const afterHeader = justfile.split(/^test:$/m)[1];
+  assert.ok(afterHeader, "justfile should define a test recipe");
+  return afterHeader.split(/^\S/m)[0] ?? "";
+}
+
+// `just test` calls these two separately so setup failures can exit 2 while a
+// failing assertion stays exit 1; `npm test` chains them for anyone not using
+// just. Both must keep calling both, in order — inline a stage or drop one and
+// the suite quietly runs against stale dist, or does nothing at all, while
+// staying green. Only the two script names live here, so nothing is duplicated.
+test("both entry points run setup then the suite", () => {
+  const surfaces = {
+    "npm test": PACKAGE_JSON.scripts?.test ?? "",
+    "just test": justTestRecipe(),
+  };
+
+  for (const [surface, body] of Object.entries(surfaces)) {
+    const setupAt = body.indexOf("npm run test:setup");
+    const runAt = body.indexOf("npm run test:run");
+
+    assert.ok(setupAt !== -1, `${surface} should call npm run test:setup`);
+    assert.ok(runAt !== -1, `${surface} should call npm run test:run`);
+    assert.ok(
+      setupAt < runAt,
+      `${surface} should compile in test:setup before test:run executes the suite`,
+    );
+  }
 });
 
 test("build npm scripts avoid POSIX-only filesystem commands", () => {
