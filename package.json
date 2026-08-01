@@ -9,7 +9,8 @@
     "report": "node dist/reporter/report.js",
     "install-service": "node dist/reporter/install.js",
     "uninstall-service": "node dist/reporter/uninstall.js",
-    "test": "npm run build && npm run build:tests && npm run test:run",
+    "test": "npm run test:setup && npm run test:run",
+    "test:setup": "npm run build && npm run build:tests",
     "test:run": "node --test dist/test/*.test.js",
     "dev-report": "bash scripts/dev-report.sh",
     "prepare": "npm run build"
