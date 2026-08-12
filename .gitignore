@@ -11,3 +11,11 @@ node_modules/
 .agentsview-update-check
 dist/
 *.tsbuildinfo
+
+# Sparkle writes .sparkle/merge-policy.json into every agent worktree; without
+# this, `git status` is permanently dirty and worker spin-down refuses.
+.sparkle/
+
+# Beads / Dolt files (added by bd init). Only .dolt/ is root-level; the rest of
+# the beads artifacts are already covered by the tracked .beads/.gitignore.
+.dolt/
