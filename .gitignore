@@ -11,3 +11,9 @@ node_modules/
 .agentsview-update-check
 dist/
 *.tsbuildinfo
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
+.beads/proxieddb/
