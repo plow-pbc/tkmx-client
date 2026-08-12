@@ -1,0 +1,59 @@
+#!/bin/sh
+# roborev post-commit hook v4 - auto-reviews every commit
+_roborev_hook() {
+ROBOREV="/Users/drodio/.local/bin/roborev"
+if [ ! -x "$ROBOREV" ]; then
+    ROBOREV=$(command -v roborev 2>/dev/null)
+    [ -z "$ROBOREV" ] || [ ! -x "$ROBOREV" ] && return 0
+fi
+"$ROBOREV" post-commit 2>/dev/null
+}
+_roborev_hook
+# roborev post-commit — seed-owned wrapper around `roborev post-commit`.
+#
+# roborev enqueues a review for EVERY commit, and the seed sets core.hooksPath
+# GLOBALLY, so this hook also fires inside the throwaway git repos that test
+# suites build under the system temp dir and commit into. pytest's
+# tmp_path_factory roots those at <tmp>/pytest-of-<user>/..., and a suite that
+# commits real fixture data there (e.g. a backfill exporter under test) floods
+# the roborev DB with reviews that are pure noise and have to be closed by hand.
+#
+# Skip ONLY a confirmed pytest path. This is deliberately NARROWER than the
+# display-side _EPHEMERAL_ROOT_PREFIXES in _roborev_hooklib.py (/tmp, /var/folders,
+# …): verify.sh proves the live loop by committing in a generic `mktemp -d` repo
+# under /tmp and asserting the hook enqueued a review, so a blanket temp-dir skip
+# would break that proof. (The display filter still hides any such review from the
+# agent backlog.) If the toplevel can't be resolved we DELEGATE, never skip — so
+# the only divergence from roborev's unguarded stub is for confirmed pytest repos.
+#
+# Require BOTH a `pytest-of-<user>` and a `pytest-<N>` path component (pytest's
+# tmp_path_factory always produces both), not just a bare `pytest-of-` substring —
+# so a project merely named `pytest-of-tools` is still reviewed. In a `case` glob
+# `*` spans `/`, so the two components are NOT required to be adjacent; that's a
+# deliberately loose heuristic, not a precise layout match.
+#
+# Known, accepted narrowness (favoring verify.sh's live-loop proof over breadth):
+#   - a `pytest --basetemp=<dir>` run produces no `pytest-of-` component, so it is
+#     NOT skipped here — if such noise recurs, that's the gap, not a regression;
+#   - conversely, an (improbable) long-lived repo that happens to carry both a
+#     `pytest-of-*` and a later `pytest-*` path component is silently skipped.
+#   Both are deliberate trade-offs, not bugs.
+top=$(git rev-parse --show-toplevel 2>/dev/null || true)
+case "$top" in
+    */pytest-of-*/pytest-*) exit 0 ;;
+esac
+
+# NOTE: `roborev install-hook --force` (e.g. a roborev self-update) rewrites this
+# file back to the unguarded stub; re-run the seed install to restore the guard.
+#
+# Locate roborev the same way roborev's own install-hook stub does: the seed's
+# pinned user-scope path first, then PATH; a missing binary is a silent no-op.
+ROBOREV="$HOME/.local/bin/roborev"
+if [ ! -x "$ROBOREV" ]; then
+    ROBOREV=$(command -v roborev 2>/dev/null)
+    if [ -z "$ROBOREV" ] || [ ! -x "$ROBOREV" ]; then exit 0; fi
+fi
+# stderr suppressed and exit status passed straight through, matching roborev's own
+# generated stub — a post-commit hook stays silent (git ignores its exit code
+# anyway); enqueue health is surfaced via `roborev status`, not the hook.
+"$ROBOREV" post-commit 2>/dev/null
