@@ -1,6 +1,6 @@
 # Builder Index Client
 
-Reports your Claude Code, Codex, Pi harness, and OpenCode token usage to the [Builder Index](https://aiworthusing.com/builder-index). Each user gets a shareable profile page at `aiworthusing.com/builder-index/u/YOUR_NAME`.
+Reports your local coding-agent token usage — whatever agentsview indexes, Claude Code and Codex and Pi and OpenCode among them — to the [Builder Index](https://aiworthusing.com/builder-index). Each user gets a shareable profile page at `aiworthusing.com/builder-index/u/YOUR_NAME`.
 
 ## Quick Start
 
@@ -22,7 +22,7 @@ npm run install-service           # auto-report every 2 hours
 
 ### 1. Install dependencies
 
-[agentsview](https://www.agentsview.io/token-usage/) is required — it reads your local Claude Code, Codex, Pi harness, and OpenCode usage data from an incrementally-synced SQLite index, which is dramatically faster than walking every transcript on each report.
+[agentsview](https://www.agentsview.io/token-usage/) is required — it reads your local agent usage data from an incrementally-synced SQLite index, and the reporter collects every agent that index holds, which is dramatically faster than walking every transcript on each report.
 
 **macOS / Linux:**
 
@@ -107,10 +107,10 @@ npm run report
 
 ```
 [2026-04-08T12:30:40.544Z] Collecting 28d usage since 20260311 for your-name (team: your-team)
-  Claude (local): 23 days
-  Codex (local): 5 days
-  Pi (local): 3 days
-  OpenCode (local): 8 days
+  claude (local): 23 days
+  codex (local): 5 days
+  opencode (local): 8 days
+  pi (local): 3 days
 [2026-04-08T12:30:44.237Z] Server responded 200: {"ok":true,"rows":72}
 ```
 

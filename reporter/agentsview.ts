@@ -153,8 +153,6 @@ export type AgentsviewUsageByAgent = Record<string, DailyUsage[]>;
 // succeeds, and the source simply never appears on the profile. Reading the
 // index instead means a new agent is collected the first time it writes a
 // session, with no client release.
-//
-// Same better-sqlite3 read pattern as reporter/cursor.ts.
 export function discoverAgents(env: NodeJS.ProcessEnv = process.env): string[] {
   const home = env.HOME || env.USERPROFILE || "";
   // Deliberately not AGENT_VIEWER_DATA_DIR: that names the isolated per-home
