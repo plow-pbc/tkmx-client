@@ -17,6 +17,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { spawn } from "node:child_process";
+import { writeFakeIndex } from "./fake-index";
 
 // After build, __dirname = dist/test/. Project root is two levels up;
 // the compiled report.js is at dist/reporter/report.js (one level up).
@@ -70,10 +71,11 @@ function writeFakeAgentsview(fakeBin, argvLog, dailyJson, failUsageEnvKey = "", 
 const path = require("path");
 const args = process.argv.slice(1);
 const cmd = path.basename(args[0] || "");
-if (cmd !== "usage" && cmd !== "stats") return;
+if (cmd !== "usage" && cmd !== "stats" && cmd !== "sync") return;
 args[0] = cmd;
 const envCols = ["CODEX_SESSIONS_DIR", "CLAUDE_PROJECTS_DIR", "PIEBALD_DIR", "OPENCODE_DIR", "AGENT_VIEWER_DATA_DIR"].map((k) => k + "=" + (process.env[k] || ""));
 fs.appendFileSync(${JSON.stringify(argvLog)}, args.concat(envCols).join("\\t") + "\\n");
+if (cmd === "sync") { process.exit(0); }
 if (cmd === "usage") {
   if (${JSON.stringify(failUsageEnvKey)} && process.env[${JSON.stringify(failUsageEnvKey)}] === ${JSON.stringify(failUsageEnvValue)}) {
     process.stderr.write("agentsview: simulated usage failure for " + ${JSON.stringify(failUsageEnvKey)} + "=" + process.env[${JSON.stringify(failUsageEnvKey)}] + "\\n");
@@ -105,6 +107,8 @@ printf '%s\\t' "$@" >> "${argvLog}"
 printf 'CODEX_SESSIONS_DIR=%s\\tCLAUDE_PROJECTS_DIR=%s\\tPIEBALD_DIR=%s\\tOPENCODE_DIR=%s\\tAGENT_VIEWER_DATA_DIR=%s\\t' "$CODEX_SESSIONS_DIR" "$CLAUDE_PROJECTS_DIR" "$PIEBALD_DIR" "$OPENCODE_DIR" "$AGENT_VIEWER_DATA_DIR" >> "${argvLog}"
 printf '\\n' >> "${argvLog}"
 case "$1" in
+  sync)
+    ;;
   --version)
     echo "agentsview v0.25.0 (commit abcdef1, built 2026-04-24T00:00:00Z)"
     ;;
@@ -144,6 +148,10 @@ esac
 // the reporter branches on, e.g. profile_frozen.
 async function setupE2E({ dailyJson, failUsageEnvKey = "", failUsageEnvValue = "", responseJson = { ok: true } as Record<string, unknown> }) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tkmx-e2e-"));
+  // baseEnv sets HOME to tmp, so discoverAgents() reads this index rather than
+  // the developer's real one — which would otherwise make these assertions
+  // depend on whichever agents the machine running the suite happens to have.
+  writeFakeIndex(path.join(tmp, ".agentsview"), ["claude", "codex", "pi", "opencode"]);
   const argvLog = path.join(tmp, "argv.log");
   const fakeScript = path.join(tmp, process.platform === "win32" ? "fake-agentsview-preload.cjs" : "fake-agentsview");
   writeFakeAgentsview(fakeScript, argvLog, dailyJson, failUsageEnvKey, failUsageEnvValue);

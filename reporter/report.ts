@@ -154,7 +154,7 @@ function collectExtraAgentsviewHomes(
   bin: string,
   sinceStr: string,
   raw: string,
-  opts: { agent: string; subdir: string; subdirEnvKey: string; label: string },
+  opts: { agent: string; subdir: string; subdirEnvKey: string },
 ): DailyUsage[] {
   let daily: DailyUsage[] = [];
   for (const entry of parseExtraConfigs(raw)) {
@@ -163,7 +163,7 @@ function collectExtraAgentsviewHomes(
     const subdirPath = opts.subdir === "." ? absEntry : path.join(absEntry, opts.subdir);
     const expectedPathLabel = opts.subdir === "." ? "directory" : `${opts.subdir}/ subdir`;
     if (!fs.existsSync(subdirPath)) {
-      throw new Error(`${opts.label} (${name}) missing ${expectedPathLabel} at ${absEntry} — a configured EXTRA_${opts.label.toUpperCase()}_CONFIGS home must be a valid ${opts.agent} home`);
+      throw new Error(`${opts.agent} (${name}) missing ${expectedPathLabel} at ${absEntry} — a configured EXTRA_${opts.agent.toUpperCase()}_CONFIGS home must be a valid ${opts.agent} home`);
     }
     const dataDir = agentsviewDataDirFor(absEntry);
     fs.mkdirSync(dataDir, { recursive: true });
@@ -174,9 +174,9 @@ function collectExtraAgentsviewHomes(
         [opts.subdirEnvKey]: subdirPath,
       });
     } catch (err) {
-      throw new Error(`${opts.label} (${name}) usage collection failed: ${errMessage(err)}`);
+      throw new Error(`${opts.agent} (${name}) usage collection failed: ${errMessage(err)}`);
     }
-    console.log(`  ${opts.label} (${name}): ${homeDaily.length} days`);
+    console.log(`  ${opts.agent} (${name}): ${homeDaily.length} days`);
     daily = daily.concat(homeDaily);
   }
   return daily;
@@ -351,24 +351,37 @@ async function main(): Promise<void> {
   if (agentsviewVersion) console.log(`  agentsview version: ${agentsviewVersion}`);
 
   const localAgentsviewDaily = collectAgentsviewUsage(agentsviewBin, sinceStr);
-  console.log(`  Claude (local): ${localAgentsviewDaily.claude.length} days`);
-  console.log(`  Codex (local): ${localAgentsviewDaily.codex.length} days`);
-  console.log(`  Pi (local): ${localAgentsviewDaily.pi.length} days`);
-  console.log(`  OpenCode (local): ${localAgentsviewDaily.opencode.length} days`);
+
+  // The EXTRA_*_CONFIGS names stay a fixed map because they're a documented
+  // .env contract with per-agent home layouts, not a list of what's
+  // collectable — an agent discovered in the index simply has no extras.
+  const EXTRA_HOMES: Record<string, { raw: string; subdir: string; subdirEnvKey: string }> = {
+    claude: { raw: EXTRA_CLAUDE_CONFIGS, subdir: "projects", subdirEnvKey: "CLAUDE_PROJECTS_DIR" },
+    codex: { raw: EXTRA_CODEX_CONFIGS, subdir: "sessions", subdirEnvKey: "CODEX_SESSIONS_DIR" },
+    pi: { raw: EXTRA_PI_CONFIGS, subdir: ".", subdirEnvKey: "PIEBALD_DIR" },
+    opencode: { raw: EXTRA_OPENCODE_CONFIGS, subdir: ".", subdirEnvKey: "OPENCODE_DIR" },
+  };
+
+  // Union so a configured extra home is still collected when that agent has no
+  // local sessions to be discovered from.
+  const agents = [...new Set([
+    ...Object.keys(localAgentsviewDaily),
+    ...Object.keys(EXTRA_HOMES).filter((a) => EXTRA_HOMES[a].raw),
+  ])].sort();
+  for (const agent of agents) {
+    console.log(`  ${agent} (local): ${(localAgentsviewDaily[agent] || []).length} days`);
+  }
 
   // Extra homes outside the local scan are folded into their matching
   // AgentsView-backed source so mergeDailyUsage sums same-(date,model,source)
   // rows before POST (see merge.ts for the canonical dedup/summing contract)
   // rather than letting them collide on the server upsert.
-  const agentsviewSources = [
-    { local: localAgentsviewDaily.claude, raw: EXTRA_CLAUDE_CONFIGS, agent: "claude", subdir: "projects", subdirEnvKey: "CLAUDE_PROJECTS_DIR", label: "Claude" },
-    { local: localAgentsviewDaily.codex, raw: EXTRA_CODEX_CONFIGS, agent: "codex", subdir: "sessions", subdirEnvKey: "CODEX_SESSIONS_DIR", label: "Codex" },
-    { local: localAgentsviewDaily.pi, raw: EXTRA_PI_CONFIGS, agent: "pi", subdir: ".", subdirEnvKey: "PIEBALD_DIR", label: "Pi" },
-    { local: localAgentsviewDaily.opencode, raw: EXTRA_OPENCODE_CONFIGS, agent: "opencode", subdir: ".", subdirEnvKey: "OPENCODE_DIR", label: "OpenCode" },
-  ];
-  const agentsviewDaily = agentsviewSources.map((s) => (
-    s.local.concat(collectExtraAgentsviewHomes(agentsviewBin, sinceStr, s.raw, s))
-  ));
+  const agentsviewDaily = agents.map((agent) => {
+    const local = localAgentsviewDaily[agent] || [];
+    const extra = EXTRA_HOMES[agent];
+    if (!extra) return local;
+    return local.concat(collectExtraAgentsviewHomes(agentsviewBin, sinceStr, extra.raw, { agent, ...extra }));
+  });
 
   const openaiDaily = await collectOpenAIUsage(sinceStr);
   if (openaiDaily.length > 0) {

@@ -4,7 +4,8 @@ import * as path from "node:path";
 import * as os from "node:os";
 import * as fs from "node:fs";
 
-import { parseAgentsviewOutput, toIsoDate, collectAgentsviewUsage, resolveAgentsviewWith } from "../reporter/agentsview";
+import { parseAgentsviewOutput, toIsoDate, collectAgentsviewUsage, discoverAgents, resolveAgentsviewWith } from "../reporter/agentsview";
+import { writeFakeIndex } from "./fake-index";
 
 // Write an executable fixture (default: a no-op shell stub) and mark it +x.
 function writeExec(p, body = "#!/bin/sh\n") {
@@ -122,9 +123,15 @@ describe("parseAgentsviewOutput", () => {
 });
 
 describe("collectAgentsviewUsage local agents", () => {
-  it("collects claude, codex, pi, and opencode with one sync pass", () => {
+  it("collects whatever agents the index holds, syncing once first", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tkmx-agents-"));
+    const origDataDir = process.env.AGENTSVIEW_DATA_DIR;
     try {
+      // `hermes` is the point: it's not one of the four this used to name, and
+      // a real machine had it. Discovery has to reach it with no code change.
+      writeFakeIndex(tmp, ["claude", "codex", "hermes"]);
+      process.env.AGENTSVIEW_DATA_DIR = tmp;
+
       const logPath = path.join(tmp, "calls.log");
       const fakeBin = path.join(tmp, "agentsview");
       writeExec(
@@ -137,26 +144,43 @@ for arg in "$@"; do
   prev="$arg"
 done
 echo "$*" >> "${logPath}"
+if [ "$1" = "sync" ]; then exit 0; fi
 printf '{"daily":[{"date":"2026-05-01","modelBreakdowns":[{"modelName":"%s-model","inputTokens":10,"outputTokens":2}]}]}\\n' "$agent"
 `,
       );
 
       const usageByAgent = collectAgentsviewUsage(fakeBin, "20260501") as any;
 
-      assert.deepEqual(Object.keys(usageByAgent).sort(), ["claude", "codex", "opencode", "pi"]);
+      assert.deepEqual(Object.keys(usageByAgent).sort(), ["claude", "codex", "hermes"]);
+      assert.equal(usageByAgent.hermes[0].modelBreakdowns[0].source, "hermes");
       assert.equal(usageByAgent.claude[0].modelBreakdowns[0].source, "claude");
-      assert.equal(usageByAgent.codex[0].modelBreakdowns[0].source, "codex");
-      assert.equal(usageByAgent.pi[0].modelBreakdowns[0].source, "pi");
-      assert.equal(usageByAgent.opencode[0].modelBreakdowns[0].source, "opencode");
 
       const lines = fs.readFileSync(logPath, "utf-8").trim().split("\n");
-      const agents = lines.map((line) => line.match(/--agent ([^ ]+)/)?.[1]);
-      assert.equal(agents[0], "claude");
-      assert.deepEqual(agents.slice(1).sort(), ["codex", "opencode", "pi"]);
-      assert.ok(!lines[0].includes("--no-sync"), "first claude call should trigger the one sync pass");
+      assert.equal(lines[0], "sync", "sync runs before discovery reads the index");
+      const agents = lines.slice(1).map((line) => line.match(/--agent ([^ ]+)/)?.[1]);
+      assert.deepEqual(agents.sort(), ["claude", "codex", "hermes"]);
       for (const line of lines.slice(1)) {
-        assert.ok(line.includes("--no-sync"), `follow-up call should skip sync: ${line}`);
+        assert.ok(line.includes("--no-sync"), `usage call should skip sync: ${line}`);
       }
+    } finally {
+      if (origDataDir === undefined) delete process.env.AGENTSVIEW_DATA_DIR;
+      else process.env.AGENTSVIEW_DATA_DIR = origDataDir;
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("discoverAgents", () => {
+  it("throws on an unreadable index rather than reporting an empty agent list", () => {
+    // The failure that matters isn't the crash, it's the alternative: [] means
+    // zero agents collected, a POST of no usage, and a profile that reads as a
+    // quiet day. Loud beats silent — REVIEW.md § Review priority.
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tkmx-discover-"));
+    try {
+      assert.throws(
+        () => discoverAgents({ AGENTSVIEW_DATA_DIR: tmp } as NodeJS.ProcessEnv),
+        /cannot read the AgentsView index/,
+      );
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
@@ -166,11 +190,15 @@ printf '{"daily":[{"date":"2026-05-01","modelBreakdowns":[{"modelName":"%s-model
 describe("collectAgentsviewUsage WARP_DIR scoping", () => {
   // A fake agentsview that records the WARP_DIR it received plus its args,
   // then emits empty daily JSON so the caller parses cleanly. Proves the
-  // Warp-skip is scoped to the syncing call (the only one that runs the
-  // parser registry that hangs an unattended daemon), not the --no-sync one.
-  it("sets WARP_DIR=/var/empty on the syncing claude call but not follow-up agent calls", () => {
+  // Warp-skip is scoped to the sync call (the only one that runs the
+  // parser registry that hangs an unattended daemon), not the usage ones.
+  it("sets WARP_DIR=/var/empty on the sync call but not the per-agent usage calls", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tkmx-warp-"));
+    const origDataDir = process.env.AGENTSVIEW_DATA_DIR;
     try {
+      writeFakeIndex(tmp, ["claude", "codex"]);
+      process.env.AGENTSVIEW_DATA_DIR = tmp;
+
       const logPath = path.join(tmp, "calls.log");
       const fakeBin = path.join(tmp, "agentsview");
       writeExec(
@@ -181,16 +209,17 @@ describe("collectAgentsviewUsage WARP_DIR scoping", () => {
       collectAgentsviewUsage(fakeBin, "20260501");
 
       const lines = fs.readFileSync(logPath, "utf-8").trim().split("\n");
-      const claudeLine = lines.find((l) => l.includes("--agent claude"));
-      assert.match(claudeLine, /WARP_DIR=\/var\/empty\|/);
+      assert.match(lines[0], /^WARP_DIR=\/var\/empty\|sync$/);
 
-      for (const agent of ["codex", "pi", "opencode"]) {
+      for (const agent of ["claude", "codex"]) {
         const line = lines.find((l) => l.includes(`--agent ${agent}`));
         assert.ok(line, `missing ${agent} call`);
         assert.ok(line.includes("--no-sync"), `${agent} call should pass --no-sync`);
         assert.doesNotMatch(line, /WARP_DIR=\/var\/empty\|/);
       }
     } finally {
+      if (origDataDir === undefined) delete process.env.AGENTSVIEW_DATA_DIR;
+      else process.env.AGENTSVIEW_DATA_DIR = origDataDir;
       fs.rmSync(tmp, { recursive: true, force: true });
     }
   });

@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { errMessage } from "./errors";
+import type Database from "better-sqlite3";
 import type { DailyUsage, ModelBreakdown } from "./usage";
 
 interface RawMoney {
@@ -142,9 +143,50 @@ interface AgentsviewJson {
   daily?: RawDailyEntry[];
 }
 
-export const LOCAL_AGENTSVIEW_AGENTS = ["claude", "codex", "pi", "opencode"] as const;
-export type AgentsviewAgent = (typeof LOCAL_AGENTSVIEW_AGENTS)[number];
-export type AgentsviewUsageByAgent = Record<AgentsviewAgent, DailyUsage[]>;
+export type AgentsviewUsageByAgent = Record<string, DailyUsage[]>;
+
+// Which agents to collect comes from the local index, not a list in this file.
+// AgentsView grows parsers between releases — 0.25 already handles copilot,
+// gemini, cursor, iflow and amp beyond the four this used to name — and a
+// machine can carry an agent no release anticipated (`hermes`, here). A literal
+// list drops every one of them the same way: the reporter exits 0, the POST
+// succeeds, and the source simply never appears on the profile. Reading the
+// index instead means a new agent is collected the first time it writes a
+// session, with no client release.
+//
+// Same better-sqlite3 read pattern as reporter/cursor.ts.
+export function discoverAgents(env: NodeJS.ProcessEnv = process.env): string[] {
+  const home = env.HOME || env.USERPROFILE || "";
+  // Both names are live: agentsview documents AGENTSVIEW_DATA_DIR, and this
+  // reporter already sets AGENT_VIEWER_DATA_DIR to isolate extra-home scans.
+  const dataDir = env.AGENTSVIEW_DATA_DIR || env.AGENT_VIEWER_DATA_DIR || path.join(home, ".agentsview");
+  const dbPath = path.join(dataDir, "sessions.db");
+
+  let DatabaseCtor: typeof Database;
+  try {
+    DatabaseCtor = require("better-sqlite3");
+  } catch (err) {
+    throw new Error(`agent discovery needs better-sqlite3: ${errMessage(err)}`);
+  }
+
+  // Throws rather than returning [] — an empty list collects nothing, and a
+  // reporter that POSTs zero usage looks exactly like a quiet day. REVIEW.md
+  // asks for loud breaks over silent skips, and this is the skip it means.
+  let db: Database.Database;
+  try {
+    db = new DatabaseCtor(dbPath, { readonly: true });
+  } catch (err) {
+    throw new Error(`cannot read the AgentsView index at ${dbPath}: ${errMessage(err)}`);
+  }
+  try {
+    const rows = db.prepare(
+      "SELECT DISTINCT agent FROM sessions WHERE agent IS NOT NULL AND agent != '' ORDER BY agent",
+    ).all() as Array<{ agent: string }>;
+    return rows.map((r) => r.agent);
+  } finally {
+    db.close();
+  }
+}
 
 function costDollars(cost: RawModelBreakdown["cost"]): number | undefined {
   if (cost === undefined) return undefined;
@@ -220,24 +262,32 @@ function queryAgent(
   return parseAgentsviewOutput(JSON.parse(raw), agent);
 }
 
-// One sync call covers every agent: agentsview's syncAllLocked
-// (internal/sync/engine.go) iterates parser.Registry in a single
-// pass, so triggering sync via the first query also picks up
-// codex, pi, opencode, gemini, copilot, etc. Follow-up queries pass
-// --no-sync to avoid redundant sync passes. If agentsview ever
-// changes to per-agent sync scoping, remove that optimization here.
+// Sync explicitly before discovery, not as a side effect of the first query:
+// discoverAgents reads the index, so an agent whose first session landed since
+// the last sync has to be written before we look. agentsview's syncAllLocked
+// (internal/sync/engine.go) iterates parser.Registry in one pass, so this
+// covers every agent and the per-agent queries then all pass --no-sync.
 export function collectAgentsviewUsage(
   bin: string,
   sinceStr: string,
   timeoutMs: number = 180000,
 ): AgentsviewUsageByAgent {
+  try {
+    execFileSync(bin, ["sync"], {
+      encoding: "utf-8",
+      timeout: timeoutMs,
+      env: { ...process.env, WARP_DIR: WARP_SKIP_DIR },
+    });
+  } catch (err) {
+    const stderr = (err as { stderr?: Buffer }).stderr?.toString().trim() || "";
+    throw new Error(`agentsview sync failed${stderr ? `: ${stderr}` : `: ${errMessage(err)}`}`);
+  }
+
   const since = toIsoDate(sinceStr);
-  const usageByAgent = {} as AgentsviewUsageByAgent;
-
-  LOCAL_AGENTSVIEW_AGENTS.forEach((agent, index) => {
-    usageByAgent[agent] = queryAgent(bin, since, agent, index > 0, timeoutMs);
-  });
-
+  const usageByAgent: AgentsviewUsageByAgent = {};
+  for (const agent of discoverAgents()) {
+    usageByAgent[agent] = queryAgent(bin, since, agent, true, timeoutMs);
+  }
   return usageByAgent;
 }
 
