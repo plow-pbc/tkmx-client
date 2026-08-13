@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { errMessage } from "./errors";
-import type Database from "better-sqlite3";
+import Database from "better-sqlite3";
 import type { DailyUsage, ModelBreakdown } from "./usage";
 
 interface RawMoney {
@@ -163,19 +163,14 @@ export function discoverAgents(env: NodeJS.ProcessEnv = process.env): string[] {
   const dataDir = env.AGENTSVIEW_DATA_DIR || path.join(home, ".agentsview");
   const dbPath = path.join(dataDir, "sessions.db");
 
-  let DatabaseCtor: typeof Database;
-  try {
-    DatabaseCtor = require("better-sqlite3");
-  } catch (err) {
-    throw new Error(`agent discovery needs better-sqlite3: ${errMessage(err)}`);
-  }
-
   // Throws rather than returning [] — an empty list collects nothing, and a
   // reporter that POSTs zero usage looks exactly like a quiet day. REVIEW.md
   // asks for loud breaks over silent skips, and this is the skip it means.
+  // (cursor.ts loads better-sqlite3 dynamically because it returns null on
+  // failure; discovery aborts the run either way, so a catch buys nothing.)
   let db: Database.Database;
   try {
-    db = new DatabaseCtor(dbPath, { readonly: true });
+    db = new Database(dbPath, { readonly: true });
   } catch (err) {
     throw new Error(`cannot read the AgentsView index at ${dbPath}: ${errMessage(err)}`);
   }
