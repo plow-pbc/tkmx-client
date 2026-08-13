@@ -146,12 +146,12 @@ esac
 // everything the test needs plus a cleanup fn.
 // responseJson is widened past its default so a test can add response fields
 // the reporter branches on, e.g. profile_frozen.
-async function setupE2E({ dailyJson, failUsageEnvKey = "", failUsageEnvValue = "", responseJson = { ok: true } as Record<string, unknown> }) {
+async function setupE2E({ dailyJson, failUsageEnvKey = "", failUsageEnvValue = "", responseJson = { ok: true } as Record<string, unknown>, indexAgents = ["claude", "codex", "pi", "opencode"] }) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tkmx-e2e-"));
   // baseEnv sets HOME to tmp, so discoverAgents() reads this index rather than
   // the developer's real one — which would otherwise make these assertions
   // depend on whichever agents the machine running the suite happens to have.
-  writeFakeIndex(path.join(tmp, ".agentsview"), ["claude", "codex", "pi", "opencode"]);
+  writeFakeIndex(path.join(tmp, ".agentsview"), indexAgents);
   const argvLog = path.join(tmp, "argv.log");
   const fakeScript = path.join(tmp, process.platform === "win32" ? "fake-agentsview-preload.cjs" : "fake-agentsview");
   writeFakeAgentsview(fakeScript, argvLog, dailyJson, failUsageEnvKey, failUsageEnvValue);
@@ -619,6 +619,36 @@ for (const tc of [
     }
   });
 }
+
+// Local agents come from the index, so an agent present only as a configured
+// extra home isn't discovered — the reporter unions the two. Without that, a
+// machine that runs codex solely through EXTRA_CODEX_CONFIGS would silently
+// report nothing for it.
+test("an extra home is collected for an agent with no local sessions", async () => {
+  const ctx = await setupE2E({
+    dailyJson:
+      '{"daily":[{"date":"2026-05-25","modelBreakdowns":[{"modelName":"gpt-5.5","inputTokens":1000,"outputTokens":100,"cacheCreationTokens":0,"cacheReadTokens":0}]}]}',
+    indexAgents: ["claude"],
+  });
+  const extraRoot = fs.mkdtempSync(path.join(os.tmpdir(), "tkmx-union-"));
+  fs.mkdirSync(path.join(extraRoot, "sessions"), { recursive: true });
+  try {
+    const result = await runReporter({
+      ...ctx.baseEnv,
+      REPORT_DAYS: "3650",
+      EXTRA_CODEX_CONFIGS: extraRoot,
+    });
+    assert.equal(result.status, 0, `reporter exited non-zero.\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+    const captured = ctx.getCaptured();
+    const day = captured.data.find((d) => d.date === "2026-05-25");
+    const codexRow = day.modelBreakdowns.find((m) => m.source === "codex");
+    assert.ok(codexRow, "codex reached the payload only via its configured extra home");
+    assert.equal(codexRow.inputTokens, 1000);
+  } finally {
+    fs.rmSync(extraRoot, { recursive: true, force: true });
+    ctx.cleanup();
+  }
+});
 
 // Fail-loud posture: a home the operator explicitly configured but that can't
 // be collected must abort before POST, not be silently omitted from a

@@ -157,9 +157,10 @@ export type AgentsviewUsageByAgent = Record<string, DailyUsage[]>;
 // Same better-sqlite3 read pattern as reporter/cursor.ts.
 export function discoverAgents(env: NodeJS.ProcessEnv = process.env): string[] {
   const home = env.HOME || env.USERPROFILE || "";
-  // Both names are live: agentsview documents AGENTSVIEW_DATA_DIR, and this
-  // reporter already sets AGENT_VIEWER_DATA_DIR to isolate extra-home scans.
-  const dataDir = env.AGENTSVIEW_DATA_DIR || env.AGENT_VIEWER_DATA_DIR || path.join(home, ".agentsview");
+  // Deliberately not AGENT_VIEWER_DATA_DIR: that names the isolated per-home
+  // index this reporter hands a child scanning one EXTRA_*_CONFIGS home, which
+  // is the opposite of the local index the local agent list comes from.
+  const dataDir = env.AGENTSVIEW_DATA_DIR || path.join(home, ".agentsview");
   const dbPath = path.join(dataDir, "sessions.db");
 
   let DatabaseCtor: typeof Database;
