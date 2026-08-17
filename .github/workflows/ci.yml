@@ -22,17 +22,25 @@ permissions:
 
 jobs:
   test:
-    name: typecheck + test
+    name: typecheck + test (node ${{ matrix.node }})
     runs-on: ubuntu-latest
+    strategy:
+      # Don't let one major's failure cancel the other — knowing whether a
+      # break is version-specific or universal is the whole point of the matrix.
+      fail-fast: false
+      matrix:
+        # 22 is the active LTS and the floor better-sqlite3 ^13 declares.
+        # `current` tracks whatever major is newest, which is what developer
+        # machines actually run. Testing only the LTS is how better-sqlite3 ^11
+        # stayed green here while failing to build on Node 26 locally — 26 of
+        # 272 tests dead at module load, invisible to this workflow.
+        node: ['22', 'current']
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          # 22 is the active LTS and the floor better-sqlite3 ^13 declares.
-          # Its prebuilds are Node-API, so newer majors work too — this pin is
-          # about testing the LTS, not about what the native addon can build on.
-          node-version: '22'
+          node-version: ${{ matrix.node }}
           cache: npm
 
       # Mirrors `just test`: a failed install is a setup failure, not a test
