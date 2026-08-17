@@ -1,3 +1,42 @@
+## Progress Update as of 2026-08-17 15:30 Pacific
+*(Most recent updates at top)*
+
+### Summary of changes since last update
+Closed the loop on the root cause rather than just the two symptoms: CI now runs
+a `current` Node leg alongside the '22' pin. Both legs green, with `current`
+resolving to 26.7.0 on the runner — the exact major that was silently broken.
+
+### Detail of changes made:
+- `.github/workflows/ci.yml` gains `strategy.matrix.node: ['22', 'current']`.
+  Testing only the LTS is what let better-sqlite3 ^11 stay green here while
+  failing to build on Node 26 locally (26 of 272 tests dead at module load,
+  invisible to the workflow). The agentsview resolver tests were the same blind
+  spot mirrored: green only on hosts unlike a developer's.
+- `fail-fast: false`, so one major's failure does not cancel the other —
+  distinguishing a version-specific break from a universal one is the point.
+- Checked before renaming the job: `main` has no branch protection (the
+  protection API 404s), so no required-check context named "typecheck + test"
+  exists to be orphaned by the matrix suffix.
+- Verified from the run log that the `current` leg downloaded v26.7.0, so the
+  leg genuinely exercises a newer major rather than re-running the pin.
+- All six roborev jobs on the branch are now `done` with zero open findings;
+  the three later ones each returned "No issues found".
+
+### Beads activity:
+- None; no bead store changes on this branch.
+
+### Potential concerns to address:
+- `current` is a moving target by design: a future Node major can redden CI
+  without any change in this repo. That is the intended tradeoff — it surfaces
+  ecosystem breaks at the moment they appear rather than months later on a
+  developer's machine — but it does mean a red `current` leg is not always a
+  defect in the PR that happens to be open.
+- The runner warns that actions/checkout@v4 and actions/setup-node@v4 target
+  the deprecated Node 20 action runtime. Unrelated to this branch, but it is a
+  standing warning on every run and will eventually become an error.
+- PR #70 is open with all checks green and merges cleanly; the merge itself
+  remains blocked at the permission layer.
+
 ## Progress Update as of 2026-08-17 14:10 Pacific
 *(Most recent updates at top)*
 
