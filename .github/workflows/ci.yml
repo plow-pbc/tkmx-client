@@ -29,8 +29,9 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          # 22 is the active LTS and is what better-sqlite3 ^11 ships prebuilds
-          # for; newer majors can force a source build of the native addon.
+          # 22 is the active LTS and the floor better-sqlite3 ^13 declares.
+          # Its prebuilds are Node-API, so newer majors work too — this pin is
+          # about testing the LTS, not about what the native addon can build on.
           node-version: '22'
           cache: npm
 
@@ -39,8 +40,9 @@ jobs:
       # failed" when nothing was ever run.
       # Named for what it actually does: npm ci also runs the `prepare` script
       # (npm run build → tsc), so a TypeScript compile error reddens THIS step
-      # and the Typecheck step below never runs. --ignore-scripts is not an
-      # option — better-sqlite3 needs its install script to fetch the prebuild.
+      # and the Typecheck step below never runs. (better-sqlite3 ^13 carries
+      # its prebuilds in the tarball and has no install script, so it is the
+      # `prepare` build — not the native addon — that needs scripts to run.)
       - name: Install dependencies (npm ci also runs prepare → tsc build)
         run: npm ci --no-audit --no-fund
 
