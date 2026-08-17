@@ -1,3 +1,37 @@
+## Progress Update as of 2026-08-17 16:15 Pacific
+*(Most recent updates at top)*
+
+### Summary of changes since last update
+Cleared the standing deprecation warning the previous entry flagged:
+`actions/checkout` and `actions/setup-node` move v4 -> v7. Verified by counting
+the warning in the run log — every prior run on this branch emitted it, the run
+after this commit emits zero.
+
+### Detail of changes made:
+- Both actions targeted the Node 20 action runtime, which the runner already
+  forces onto Node 24 while warning on every job. That forcing is temporary; it
+  becomes a hard failure once the runner drops the shim.
+- Read both v7 release notes before bumping rather than assuming a major is
+  drop-in: checkout v7 is security hardening plus dependency updates,
+  setup-node v7 adds `cache-primary-key`/`cache-matched-key` outputs and moves
+  to ESM internally. Nothing this workflow uses changes.
+- Verification is the warning count, not just a green tick: `gh run view --log`
+  greps 0 occurrences of "Node.js 20 is deprecated" after the bump. A green run
+  proved nothing here, since the warning never failed the build in the first
+  place.
+
+### Beads activity:
+- None; no bead store changes on this branch.
+
+### Potential concerns to address:
+- setup-node v7's notes reference updated guidance on cache-poisoning risks in
+  the npm cache. This workflow uses `cache: npm` on a shared `~/.npm` key across
+  both matrix legs. Roborev judged that safe here (the cache holds tarballs, and
+  better-sqlite3 ^13 ships Node-API prebuilds rather than per-major binaries),
+  but the upstream guidance is worth reading before any future cache change.
+- PR #70 remains open with all five checks green and mergeable; the merge is
+  still blocked at the permission layer.
+
 ## Progress Update as of 2026-08-17 15:30 Pacific
 *(Most recent updates at top)*
 
