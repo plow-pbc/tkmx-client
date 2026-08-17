@@ -75,7 +75,14 @@ test("collectSessionStats returns parsed JSON from agentsview", () => {
 });
 
 test("collectSessionStats returns null when binary missing", () => {
+  // A bogus AGENTSVIEW_BIN is ignored rather than fatal — the resolver falls
+  // through to its candidates, and the hard-coded /opt/homebrew and
+  // /usr/local paths are absolute, so HOME/PATH isolation can't hide a real
+  // install on a dev box. Stub the resolver itself so "not found" is the
+  // condition under test on every host, not just one without agentsview.
   process.env.AGENTSVIEW_BIN = "/definitely/not/here";
+  const agentsview = require("../reporter/agentsview");
+  agentsview.resolveAgentsview = () => null;
   const { collectSessionStats } = require("../reporter/session-stats");
   const out = collectSessionStats({ sinceDays: 28 });
   assert.equal(out, null);
