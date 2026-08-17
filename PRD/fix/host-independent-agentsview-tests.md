@@ -1,3 +1,37 @@
+## Progress Update as of 2026-08-17 14:10 Pacific
+*(Most recent updates at top)*
+
+### Summary of changes since last update
+Drained roborev on the branch. Two of its findings were real and are fixed: the
+sandbox I added had quietly copied production's executable predicate (costing
+two tests their coverage of the real one), and the better-sqlite3 bump left two
+CI comments describing packaging that no longer exists.
+
+### Detail of changes made:
+- `resolveSandboxed` inlined `statSync().isFile()` + `accessSync(X_OK)` — which
+  is `isExecutableFile` verbatim. "skips non-executable candidates" and "skips
+  candidates that are directories" then asserted against the test's own copy, so
+  deleting either check in production would have left both green. Exported
+  `isExecutableFile` and composed it with the fence instead. Confirmed by
+  mutation: dropping the `isFile()` check now fails the directory case, and did
+  not before.
+- Dropped the bogus `AGENTSVIEW_BIN` assignment in the session-stats case; it
+  was dead once the resolver itself was stubbed.
+- `.github/workflows/ci.yml` justified the Node 22 pin by "what better-sqlite3
+  ^11 ships prebuilds for" and claimed `--ignore-scripts` is impossible because
+  the package needs its install script. Neither survives 13.0.3: no install
+  script (`hasInstallScript` gone from the lockfile), Node-API prebuilds shipped
+  in the tarball under `prebuilds/`. Both comments corrected.
+
+### Beads activity:
+- None; no bead store changes on this branch.
+
+### Potential concerns to address:
+- PR #70 is open with all checks green; the merge itself is pending human
+  approval (the merge command was denied at the permission layer).
+- Three roborev jobs on later commits were still queued at the time of writing
+  and have not been read.
+
 ## Progress Update as of 2026-08-17 13:45 Pacific
 *(Most recent updates at top)*
 
