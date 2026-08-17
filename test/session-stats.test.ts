@@ -80,7 +80,6 @@ test("collectSessionStats returns null when binary missing", () => {
   // /usr/local paths are absolute, so HOME/PATH isolation can't hide a real
   // install on a dev box. Stub the resolver itself so "not found" is the
   // condition under test on every host, not just one without agentsview.
-  process.env.AGENTSVIEW_BIN = "/definitely/not/here";
   const agentsview = require("../reporter/agentsview");
   agentsview.resolveAgentsview = () => null;
   const { collectSessionStats } = require("../reporter/session-stats");
