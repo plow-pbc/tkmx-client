@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { execSync } from "node:child_process";
 import * as os from "node:os";
-import { LAUNCHD_LABEL, SYSTEMD_UNIT_BASENAME } from "./install";
+import { LAUNCHD_LABEL, SYSTEMD_UNIT_BASENAME, launchdPlistPath } from "./install";
 
 if (os.platform() === "darwin") {
   uninstallLaunchd();
@@ -14,7 +14,7 @@ if (os.platform() === "darwin") {
 }
 
 function uninstallLaunchd(): void {
-  const plistPath = path.join(os.homedir(), "Library", "LaunchAgents", `${LAUNCHD_LABEL}.plist`);
+  const plistPath = launchdPlistPath(os.homedir());
 
   if (fs.existsSync(plistPath)) {
     try {

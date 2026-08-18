@@ -20,10 +20,11 @@ import { collectConfigStack } from "./config-stack";
 import { collectCursorStats, type CursorStats } from "./cursor";
 import { collectSessionStats, type ExtraStatsHome } from "./session-stats";
 import { maybeAutoUpdateAgentsview } from "./agentsview-update";
-import { loadState, saveState, computeTransitionMarkers, gateOnSnapshotHash } from "./reporting-state";
+import { loadState, saveState, recordSuccess, computeTransitionMarkers, gateOnSnapshotHash } from "./reporting-state";
 import { STATS_WINDOW_DAYS, formatSinceStr } from "./window";
 import { resolveAvatarUrl } from "./avatar";
 import { errMessage } from "./errors";
+import { diagnose, collectInput, formatDiagnosis } from "./doctor";
 
 // PROJECT_ROOT is the actual checked-out repo (not dist/). After build, this
 // file lives in dist/reporter/report.js — go up two levels to reach the repo.
@@ -352,6 +353,15 @@ interface ReportBody {
   cursor_stats?: CursorStats;
   session_stats?: Record<string, unknown> | null;
   clear_dev_stats?: boolean;
+  // This machine's own verdict on whether its reporter is healthy, so the
+  // server can tell a builder who went quiet from one whose collector broke.
+  reporter_health?: ReporterHealth;
+}
+
+interface ReporterHealth {
+  healthy: boolean;
+  failing_checks: string[];
+  last_success_at: string | null;
 }
 
 async function main(): Promise<void> {
@@ -365,6 +375,21 @@ async function main(): Promise<void> {
   const statsSinceStr = formatSinceStr(STATS_WINDOW_DAYS);
 
   console.log(`[${new Date().toISOString()}] Collecting ${REPORT_DAYS}d usage since ${sinceStr} for ${USERNAME} (team: ${TEAM})`);
+
+  // Self-check every cycle rather than only on demand. The failure this guards
+  // against is that nobody looks: a builder whose reporter died learns about it
+  // from a health command they have no reason to run. Reported here, the
+  // warning lands in the launchd/systemd log next to the run that noticed it.
+  //
+  // Never fatal — a doctor that could abort the run would let a bug in the
+  // diagnosis stop the reporting it exists to protect.
+  let health: ReturnType<typeof diagnose> | null = null;
+  try {
+    health = diagnose(collectInput(Date.now(), STATE_PATH));
+    if (!health.healthy) console.warn(formatDiagnosis(health));
+  } catch (err) {
+    console.warn(`  Reporter self-check failed to run: ${errMessage(err)}`);
+  }
 
   const agentsviewBin = resolveAgentsview();
   if (!agentsviewBin) {
@@ -495,6 +520,10 @@ async function main(): Promise<void> {
     dev_stats_on:     process.env.REPORT_DEV_STATS === "true",
     session_stats_on: process.env.REPORT_SESSION_STATS !== "false"
                       && process.env.REPORT_DEV_STATS === "true",
+    // Carried forward, not recomputed: saveState writes this whole object, so
+    // rebuilding it from the env alone would erase the success stamp on every
+    // run and make a perfectly healthy reporter look like it had never worked.
+    last_success_at:  priorState.last_success_at,
   };
 
   if (currentState.dev_stats_on) {
@@ -520,6 +549,18 @@ async function main(): Promise<void> {
     }
   }
 
+  // Sent so the server can distinguish a quiet builder from a broken one
+  // without inferring it from row timestamps alone. The server half of this
+  // work (profile "last reported", operator gone-quiet list) reads it; an older
+  // server simply ignores an unknown key.
+  if (health) {
+    body.reporter_health = {
+      healthy: health.healthy,
+      failing_checks: health.checks.filter((c) => c.status === "fail").map((c) => c.name),
+      last_success_at: priorState.last_success_at,
+    };
+  }
+
   const markers = computeTransitionMarkers(priorState, currentState);
   if (markers.clear_dev_stats) body.clear_dev_stats = true;
   if ("session_stats" in markers) body.session_stats = null;
@@ -541,6 +582,13 @@ async function main(): Promise<void> {
     machineConfig?.commit();
     saveState(STATE_PATH, currentState);
   }
+
+  // Outside the freeze gate above, and last, so it records exactly one fact:
+  // the server accepted a report just now. A frozen profile still proves this
+  // machine's collector ran and reached the server, which is what the staleness
+  // signal is about — whether the reporter is alive, not whether the server
+  // chose to apply what it sent.
+  recordSuccess(STATE_PATH, new Date().toISOString());
 
   // Human-facing profile lives on the Builder Index (aiworthusing), not the API host (SERVER_URL).
   const profileUrl = `https://aiworthusing.com/builder-index/u/${USERNAME}`;

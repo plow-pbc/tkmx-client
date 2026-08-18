@@ -762,20 +762,56 @@ test("a frozen profile does not consume the one-shot transition markers", async 
     responseJson: { ok: true, profile_frozen: true },
   });
   try {
-    if (fs.existsSync(STATE_PATH)) fs.unlinkSync(STATE_PATH);
+    // Seed the prior edge this test is about: dev stats were ON, and this run
+    // turns them OFF, so clear_dev_stats must fire. Asserting on the persisted
+    // TOGGLES rather than on the state file's mere existence is deliberate —
+    // the file is also where last_success_at lives, which every successful
+    // delivery stamps whether or not the profile was frozen. Existence alone
+    // stopped being evidence that the edge was consumed once that field
+    // existed; the toggles still are.
+    fs.writeFileSync(
+      STATE_PATH,
+      JSON.stringify({ dev_stats_on: true, session_stats_on: true, last_success_at: null }),
+      "utf-8",
+    );
 
-    const result = await runReporter(ctx.baseEnv);
+    const result = await runReporter({ ...ctx.baseEnv, REPORT_DEV_STATS: "false" });
     assert.equal(
       result.status,
       0,
       `reporter exited non-zero.\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
     );
-    assert.ok(ctx.getCaptured(), "the report is still sent to a frozen profile");
+    const captured = ctx.getCaptured();
+    assert.ok(captured, "the report is still sent to a frozen profile");
+    assert.equal(captured.clear_dev_stats, true, "the transition marker fired on this run");
+
+    // reporter_health is the wire field the server half reads to tell a quiet
+    // builder from a broken one, and nothing else in the suite asserts it
+    // reaches the POST — a never-firing `if (health)` guard or a renamed key
+    // would otherwise go green. Deterministic here because baseEnv points HOME
+    // at a temp dir, so collectInput always sees no installed unit.
+    assert.ok(captured.reporter_health, "reporter_health is absent from the POST body");
+    assert.equal(captured.reporter_health.healthy, false);
+    assert.ok(
+      captured.reporter_health.failing_checks.includes("service-installed"),
+      `expected service-installed among ${JSON.stringify(captured.reporter_health.failing_checks)}`,
+    );
+
+    const persisted = JSON.parse(fs.readFileSync(STATE_PATH, "utf-8"));
     assert.equal(
-      fs.existsSync(STATE_PATH),
-      false,
+      persisted.dev_stats_on,
+      true,
       "reporting state was recorded against a server that declined to apply it, " +
         "so the next run will treat the transition as already delivered",
+    );
+    assert.equal(persisted.session_stats_on, true, "session_stats edge was consumed against a frozen profile");
+    // The other half of the same write: a delivered-but-not-applied report is
+    // still proof this machine's collector is alive, so the staleness stamp
+    // must land even though the toggles above deliberately did not.
+    assert.equal(
+      typeof persisted.last_success_at,
+      "string",
+      "a successful delivery to a frozen profile must still count as the reporter working",
     );
     // This run is the only one in the suite that reaches the frozen-profile
     // notice, and a cycle that delivers nothing must not also be silent.
