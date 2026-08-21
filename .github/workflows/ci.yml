@@ -36,11 +36,15 @@ jobs:
         # 272 tests dead at module load, invisible to this workflow.
         node: ['22', 'current']
     steps:
-      # v4 of both targets the Node 20 action runtime, which is deprecated —
-      # the runner already forces them onto Node 24 and warns on every run.
-      - uses: actions/checkout@v7
+      # Pinned to the full commit SHA, not the `v7` tag: a tag is mutable, so a
+      # retag upstream would run unreviewed code with this workflow's
+      # permissions and write access to the tested workspace. The trailing
+      # comment keeps the human-readable version; bump both together.
+      # (v4 of each targeted the deprecated Node 20 action runtime — the runner
+      # already forced them onto Node 24 and warned on every run.)
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: ${{ matrix.node }}
           cache: npm
