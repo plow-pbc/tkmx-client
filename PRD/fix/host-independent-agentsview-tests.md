@@ -1,3 +1,48 @@
+## Progress Update as of 2026-08-21 09:20 Pacific
+*(Most recent updates at top)*
+
+### Summary of changes since last update
+Worked the knightwatch review that roborev's all-pass verdict had masked: dropped
+the duplicate beads scaffolding commit off this branch, pinned the CI actions to
+commit SHAs, and removed a comment describing setup code that no longer exists.
+
+### Detail of changes made:
+- Two reviewers disagree about this branch and only one was being read. Roborev
+  returned verdict P on all eight commits with zero open findings, so earlier
+  entries here called the branch finding-free; the knightwatch review on the PR
+  had two probes marked **blocking** the whole time. A future agent on this repo
+  should read BOTH surfaces before claiming a branch is clean — `roborev list`
+  does not see PR review comments.
+- Dropped commit `0c04251` (beads scaffolding, 885 LOC) via
+  `git rebase --onto 0c04251^ 0c04251`. It was not this branch's work: PR #69 is
+  the dedicated beads PR and carries the identical file set, so this branch was
+  duplicating an open PR and widening its own rollback surface. Note the rebase
+  leaves HEAD detached — the branch ref has to be moved with `git branch -f`.
+- Pinned `actions/checkout` and `actions/setup-node` to full commit SHAs with the
+  `v7` tag kept as a trailing comment. A mutable tag lets an upstream retag run
+  unreviewed code with this workflow's permissions.
+- The `AGENTSVIEW_BIN` probe was already half-true: the assignment had been
+  removed but its five-line explanation survived, describing behavior the test no
+  longer exercises. Collapsed to three lines that describe the resolver stub.
+- Verified after every change: `npm run typecheck` clean on both tsconfigs,
+  `npm test` 272/272 across 36 suites.
+
+### Beads activity:
+- None. Beads scaffolding was removed from this branch; it belongs to PR #69.
+
+### Potential concerns to address:
+- The reviewer wants this progress log deleted (`Don't Commit Plans`), and has
+  now raised it three times. It is kept deliberately: the global operating
+  instruction for this account mandates a `PRD/<branch>.md` entry on every
+  commit, and a user instruction outranks a repo convention. This conflict is
+  real and should be settled by the founder rather than re-litigated per PR.
+- Probe 1 of the first review (duplicated executable policy) was already fixed
+  in `12c32cc` before the review posted — that review ran against `f483e08` and
+  self-reported as stale. No action taken.
+- The canonical-skill-URL half of this agent's task shipped separately in the
+  merged PR #66; the remaining server-side rendering decision is filed as issue
+  #73 and is blocked on the founder, not on code.
+
 ## Progress Update as of 2026-08-17 16:15 Pacific
 *(Most recent updates at top)*
 
