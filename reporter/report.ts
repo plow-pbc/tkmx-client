@@ -24,6 +24,7 @@ import { loadState, saveState, computeTransitionMarkers, gateOnSnapshotHash } fr
 import { STATS_WINDOW_DAYS, formatSinceStr } from "./window";
 import { resolveAvatarUrl } from "./avatar";
 import { errMessage } from "./errors";
+import { pendingLine, fetchPendingCount } from "./questions";
 
 // PROJECT_ROOT is the actual checked-out repo (not dist/). After build, this
 // file lives in dist/reporter/report.js — go up two levels to reach the repo.
@@ -545,6 +546,16 @@ async function main(): Promise<void> {
   // Human-facing profile lives on the Builder Index (aiworthusing), not the API host (SERVER_URL).
   const profileUrl = `https://aiworthusing.com/builder-index/u/${USERNAME}`;
   console.log(`  Profile: ${profileUrl}`);
+
+  // Ask-a-Builder. Silent when nothing is waiting and silent when it cannot
+  // find out — see reporter/questions.ts. Awaited rather than fired and
+  // forgotten so the line lands with the rest of the summary instead of after
+  // the process has moved on.
+  const pending = await fetchPendingCount(SERVER_URL, USERNAME);
+  if (pending !== null) {
+    const line = pendingLine({ pending, username: USERNAME, serverUrl: SERVER_URL });
+    if (line) console.log(line);
+  }
 
   for (const f of PROFILE_FIELDS) {
     if (!f.value && f.nudge) console.log(`  Set ${f.env} in .env — ${f.nudge}`);
