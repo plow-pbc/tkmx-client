@@ -4,7 +4,7 @@ import * as path from "node:path";
 import * as os from "node:os";
 import * as fs from "node:fs";
 
-import { parseAgentsviewOutput, toIsoDate, collectAgentsviewUsage, discoverAgents, syncAgentsview, resolveAgentsviewWith } from "../reporter/agentsview";
+import { parseAgentsviewOutput, toIsoDate, collectAgentsviewUsage, discoverAgents, syncAgentsview, resolveAgentsviewWith, isExecutableFile } from "../reporter/agentsview";
 import { writeFakeIndex } from "./fake-index";
 
 // Write an executable fixture (default: a no-op shell stub) and mark it +x.
@@ -347,10 +347,24 @@ describe("resolveAgentsview", () => {
     return path.join(tmp, ".local", "bin", process.platform === "win32" ? "agentsview.exe" : "agentsview");
   }
 
+  // HOME/PATH isolation cannot reach the hard-coded system candidates
+  // (/opt/homebrew/bin, /usr/local/bin) — those are absolute, so on a host
+  // that really has agentsview installed there, any case expecting "not
+  // found" resolves the host's binary instead. Cases that assert a miss go
+  // through resolveAgentsviewWith with production's own executable check
+  // fenced to the sandbox, so they read the same on a dev box as in CI — and
+  // the cases that pin that check still exercise the real one.
+  function resolveSandboxed(tmp, env = {}) {
+    return resolveAgentsviewWith({
+      platform: process.platform,
+      env: { HOME: tmp, USERPROFILE: tmp, PATH: "", ...env },
+      isExecutable: (p) => p.startsWith(tmp + path.sep) && isExecutableFile(p),
+    });
+  }
+
   it("returns null when no candidate path exists", () => {
-    withIsolatedEnv(() => {
-      const { resolveAgentsview } = require("../reporter/agentsview");
-      assert.equal(resolveAgentsview(), null);
+    withIsolatedEnv((tmp) => {
+      assert.equal(resolveSandboxed(tmp), null);
     });
   });
 
@@ -369,16 +383,14 @@ describe("resolveAgentsview", () => {
       fs.mkdirSync(path.dirname(fake), { recursive: true });
       fs.writeFileSync(fake, "#!/bin/sh\n");
       fs.chmodSync(fake, 0o644); // not executable
-      const { resolveAgentsview } = require("../reporter/agentsview");
-      assert.equal(resolveAgentsview(), null);
+      assert.equal(resolveSandboxed(tmp), null);
     });
   });
 
   it("skips candidates that are directories, not files", () => {
     withIsolatedEnv((tmp) => {
       fs.mkdirSync(path.join(tmp, ".local", "bin", "agentsview"), { recursive: true });
-      const { resolveAgentsview } = require("../reporter/agentsview");
-      assert.equal(resolveAgentsview(), null);
+      assert.equal(resolveSandboxed(tmp), null);
     });
   });
 
@@ -409,9 +421,8 @@ describe("resolveAgentsview", () => {
       const pathDir = path.join(tmp, "custom", "bin");
       const fake = path.join(pathDir, process.platform === "win32" ? "agentsview.exe" : "agentsview");
       writeExec(fake);
-      process.env.PATH = [pathDir, "/usr/bin", "/bin"].join(path.delimiter);
-      const { resolveAgentsview } = require("../reporter/agentsview");
-      assert.equal(resolveAgentsview(), fake);
+      const PATH = [pathDir, "/usr/bin", "/bin"].join(path.delimiter);
+      assert.equal(resolveSandboxed(tmp, { PATH }), fake);
     });
   });
 
