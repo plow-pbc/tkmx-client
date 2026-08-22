@@ -1,4 +1,39 @@
-## Progress Update as of 2026-08-21 09:20 Pacific
+## Progress Update as of 2026-08-22 04:35 Pacific
+*(Most recent updates at top)*
+
+### Summary of changes since last update
+Drained the roborev review of `fbc215d`, which returned verdict F on two Low
+findings against the entry below — both about that entry's own accuracy, not
+about code. Corrected both in place.
+
+### Detail of changes made:
+- The dropped-commit recipe was stated as a general property of
+  `git rebase --onto <sha>^ <sha>`, which is wrong: that form moves the branch ref
+  and keeps HEAD attached. The detachment came from the trailing `HEAD` argument
+  the entry had omitted. Recorded the command as actually run and scoped the
+  claim, so a future agent replicating it on an attached branch does not reach for
+  `git branch -f` and force-move a ref from a stale HEAD in another worktree.
+- The entry below was stamped `09:20` but its commit landed at `13:40` — a 4h20m
+  skew, where every other entry in this file lands within ~10 minutes of its
+  commit. Restamped to the commit time, since that ordering marker is what aligns
+  entries to commits.
+- This is the third review surface to speak on this branch. Roborev's verdict on
+  the PRD entry arrived AFTER the entry claimed the branch was drained, which is
+  the same trap recorded below in a new shape: a surface being quiet at the moment
+  you look is not the same as a surface having nothing to say.
+
+### Beads activity:
+- None. `bd` is not initialized on this branch; the beads scaffolding lives in
+  PR #69, which this branch deliberately stopped duplicating.
+
+### Potential concerns to address:
+- Unchanged and still owned by the founder: the merge of PR #70, the three-case
+  question in issue #73, and whether `PRD/<branch>.md` belongs in this repo at all
+  (the repo convention says don't commit plans; the global agent mandate requires
+  a progress entry per commit). Three consecutive reviews have now spent findings
+  on the contents of a file whose existence here is unsettled.
+
+## Progress Update as of 2026-08-21 13:40 Pacific
 *(Most recent updates at top)*
 
 ### Summary of changes since last update
@@ -14,10 +49,13 @@ commit SHAs, and removed a comment describing setup code that no longer exists.
   should read BOTH surfaces before claiming a branch is clean — `roborev list`
   does not see PR review comments.
 - Dropped commit `0c04251` (beads scaffolding, 885 LOC) via
-  `git rebase --onto 0c04251^ 0c04251`. It was not this branch's work: PR #69 is
-  the dedicated beads PR and carries the identical file set, so this branch was
-  duplicating an open PR and widening its own rollback surface. Note the rebase
-  leaves HEAD detached — the branch ref has to be moved with `git branch -f`.
+  `git rebase --onto 0c04251^ 0c04251 HEAD`. It was not this branch's work: PR #69
+  is the dedicated beads PR and carries the identical file set, so this branch was
+  duplicating an open PR and widening its own rollback surface. The trailing `HEAD`
+  is what left the branch ref behind: rebase checks out its third argument, and a
+  resolved `HEAD` is a commit, not a branch, so the rebase landed on a detached
+  HEAD and `git branch -f` was needed to move the ref. Passing the branch NAME
+  there instead moves the ref itself and leaves HEAD attached — prefer that.
 - Pinned `actions/checkout` and `actions/setup-node` to full commit SHAs with the
   `v7` tag kept as a trailing comment. A mutable tag lets an upstream retag run
   unreviewed code with this workflow's permissions.
