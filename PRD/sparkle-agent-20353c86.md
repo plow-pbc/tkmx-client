@@ -1,5 +1,45 @@
 # Progress — sparkle/agent-20353c86-ff69-4bd2-bd78-66300b7da550
 
+## Progress Update as of 2026-08-31, night Pacific
+*(Most recent updates at top)*
+
+### Summary of changes since last update
+Opened PRs 86 and 87, then discovered both were duplicates of older agents' work
+and CLOSED them. `git worktree list` revealed sibling worktrees already carrying
+the same two fixes. The open-PR list holds three separate TRIPLICATES; filed that
+as its own bug, because it is a bigger problem than either fix.
+
+### Detail of changes made:
+- Opened PR 86 (agentsview test isolation) and PR 87 (.sparkle/ gitignore), both
+  green on all 4 checks, both cut clean off origin/main.
+- Then listed all open PRs and found the duplication:
+  - `.sparkle/` one-liner: PR 83, PR 84, and my 87.
+  - agentsview host-independent tests: PR 70 (Aug 17), PR 85, and my 86.
+  - beads scaffolding: PR 69 (Aug 17), PR 80, PR 81.
+  Nine of fourteen open PRs are three pieces of work.
+- Verified PR 70 is strictly broader than my 86 — same `isExecutableFile` export
+  plus a host fence, AND a better-sqlite3 bump that unbreaks Node 26, AND a CI
+  node-version matrix. That last part fixes the 28 binding failures my PR could
+  only document. So mine was a subset, not an alternative.
+- Closed 86 and 87 with pointers to the older PRs and deleted both branches.
+  Reviewer attention is the scarce resource; a third variant costs more than it
+  adds.
+
+### Beads activity:
+- Opened builder-index-client-9fn (P1 bug): agents duplicate each other's work
+  because nothing in the ramp-up path shows what is already in flight.
+- Updated the stored memory for the .sparkle/ worktree-dirtiness issue to point
+  at the in-flight PRs rather than restating the problem.
+
+### Potential concerns to address:
+- I could not have caught this from `bd ready` alone — it shows unclaimed beads,
+  not in-flight branches or open PRs. `git worktree list` is what exposed it, by
+  accident. That is the gap 9fn is about.
+- Commit c48f97f on this branch is now superseded by PR 70. It is kept only as
+  the record behind the trk closure; it should NOT be landed separately.
+- scripts/file-retro-pain-point.sh does not exist in this repo, so retro pain
+  points cannot be filed by the standard tool here (builder-index-client-080).
+
 ## Progress Update as of 2026-08-31, evening Pacific
 *(Most recent updates at top)*
 
