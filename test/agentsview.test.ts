@@ -412,8 +412,13 @@ echo '{"daily":[{"date":"2026-08-29","modelBreakdowns":[{"modelName":"gpt-5.6-so
 
   it("throws on strict sync errors without querying usage", () => {
     const cases = [
-      { name: "non-zero exit", syncBody: "echo boom >&2; exit 1", timeoutMs: 180000, errorPattern: /agentsview sync failed: boom/ },
-      { name: "timeout", syncBody: "exec sleep 30", timeoutMs: 1000, errorPattern: /agentsview sync failed: .*ETIMEDOUT/ },
+      { name: "non-zero exit", syncBody: "echo boom >&2; exit 1", timeoutMs: 180000, errorPattern: /agentsview sync failed: boom/, logMayBeAbsent: false },
+      // The timeout case races the fake binary's own startup: the kill can
+      // land before /bin/sh reaches its first write, so on a loaded machine
+      // the log legitimately does not exist. Asserting an exact transcript
+      // there made the case fail about two runs in three for a reason the
+      // case does not care about.
+      { name: "timeout", syncBody: "exec sleep 30", timeoutMs: 1000, errorPattern: /agentsview sync failed: .*ETIMEDOUT/, logMayBeAbsent: true },
     ];
     for (const testCase of cases) {
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tkmx-extra-sync-"));
@@ -438,7 +443,20 @@ echo '{"daily":[]}'
           testCase.errorPattern,
           testCase.name,
         );
-        assert.deepEqual(fs.readFileSync(calls, "utf-8").trim().split("\n"), ["sync"]);
+        // What this case guarantees is that usage is never queried after a
+        // failed sync. That holds whether or not the fake got as far as
+        // logging its own invocation, so it is asserted directly; the exact
+        // transcript is still pinned where the fake is guaranteed to run.
+        const lines = fs.existsSync(calls)
+          ? fs.readFileSync(calls, "utf-8").trim().split("\n").filter(Boolean)
+          : [];
+        assert.ok(
+          !lines.some((line) => line.startsWith("usage")),
+          `${testCase.name}: usage must not run after a failed sync`,
+        );
+        if (!testCase.logMayBeAbsent) {
+          assert.deepEqual(lines, ["sync"], testCase.name);
+        }
       } finally {
         fs.rmSync(tmp, { recursive: true, force: true });
       }
