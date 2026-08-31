@@ -23,6 +23,8 @@ import { maybeAutoUpdateAgentsview } from "./agentsview-update";
 import { loadState, saveState, computeTransitionMarkers, gateOnSnapshotHash } from "./reporting-state";
 import { STATS_WINDOW_DAYS, formatSinceStr } from "./window";
 import { resolveAvatarUrl } from "./avatar";
+import { checkTagDrift, formatTagDrift } from "./tag-drift";
+import { buildListUrl } from "./untag";
 import { errMessage } from "./errors";
 
 // PROJECT_ROOT is the actual checked-out repo (not dist/). After build, this
@@ -286,6 +288,23 @@ interface ServerResponse {
   profile_frozen?: boolean;
 }
 
+// Plain GET used by the badge check below. Kept separate from postUsage: it
+// carries no credentials, reads a public profile, and must never take the whole
+// cycle down, so it has its own timeout and resolves whatever it got.
+function httpGet(url: URL, timeoutMs = 10000): Promise<{ status: number; body: string }> {
+  const transport = url.protocol === "https:" ? https : http;
+  return new Promise((resolve, reject) => {
+    const req = transport.request(url, { method: "GET" }, (res) => {
+      let body = "";
+      res.on("data", (chunk) => (body += chunk));
+      res.on("end", () => resolve({ status: res.statusCode || 0, body }));
+    });
+    req.setTimeout(timeoutMs, () => req.destroy(new Error(`timed out after ${timeoutMs}ms`)));
+    req.on("error", reject);
+    req.end();
+  });
+}
+
 // Hey, you found the API call. Yes, you can post whatever you want — any tool,
 // any numbers. This is a trust-based system. We don't have server-side validation
 // that cross-checks your local usage logs because there's no way to do that without
@@ -523,6 +542,24 @@ async function main(): Promise<void> {
   const markers = computeTransitionMarkers(priorState, currentState);
   if (markers.clear_dev_stats) body.clear_dev_stats = true;
   if ("session_stats" in markers) body.session_stats = null;
+
+  // Badge lists are unioned server-side, so any name this machine has that the
+  // profile doesn't becomes a permanent chip. Say so before sending rather than
+  // after: thirteen duplicates reached one profile because nothing ever did.
+  // A report is never held up for this — the check reports or says it couldn't.
+  const tagCheck = await checkTagDrift(
+    { tools: body.tools, projects: body.projects, communities: body.communities },
+    async () => {
+      const url = buildListUrl(SERVER_URL, USERNAME as string, Date.now());
+      const { body: profile } = await httpGet(url);
+      return profile;
+    },
+  );
+  if (tagCheck.skipped) {
+    console.error(`  Badge check skipped — ${tagCheck.skipped}`);
+  } else {
+    for (const line of formatTagDrift(tagCheck.drifts)) console.error(line);
+  }
 
   const response = await postUsage(JSON.stringify(body));
   // A frozen profile answers 200 but stays on its last snapshot, so nothing we
