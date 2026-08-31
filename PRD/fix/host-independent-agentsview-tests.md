@@ -1,3 +1,42 @@
+## Progress Update as of 2026-08-30 09:05 Pacific
+*(Most recent updates at top)*
+
+### Summary of changes since last update
+No code change of intent: rebased the 13 branch commits onto `origin/main`, which
+had moved four commits ahead (#75, #76, #77, #78) while this PR waited on a human.
+That drift had turned PR #70 CONFLICTING, and a conflicting PR never fires
+GitHub's `pull_request` event — so its checks were not failing, they were absent.
+Conflicting and untested were one fact, not two.
+
+### Detail of changes made:
+- One conflict, in `test/agentsview.test.ts`, and only in the import block:
+  `main` had added `collectAgentsviewAgentOnly` and reflowed the import to
+  multi-line; this branch had added `isExecutableFile` to the single-line form.
+  Resolved by keeping main's multi-line shape and adding `isExecutableFile` to it
+  — main's formatting is not something this branch set out to change.
+- `reporter/agentsview.ts` auto-merged; `isExecutableFile` is still exported at
+  `reporter/agentsview.ts:59` and still wired as the default `isExecutable`, so
+  the sandbox fence composed in `12c32cc` keeps its coverage of the real
+  predicate.
+- Verified on the rebased tree before pushing, on Node 26 (the skew this branch
+  exists to catch): `npm run typecheck` clean, `npm test` 276/276 pass.
+- Pushed with `--force-with-lease` pinned to the pre-rebase sha, so a concurrent
+  push by another agent would have been refused rather than overwritten. This is
+  the third agent spawned onto #70 and the spawner cannot see the others
+  (`sparkle-rk0k8o`); the other worktree holding this branch was clean and had not
+  moved since 08-21, so there was no in-flight work to fight.
+
+### Beads activity:
+- None on this branch's tracker; `bd` scaffolding still lives in PR #69.
+
+### Potential concerns to address:
+- The merge of #70 remains the founder's: this repo is pinned MERGE-PROTECTED and
+  refuses agent merges in every form. The point of this rebase is that his one
+  click now has a green, conflict-free PR under it.
+- A PR that sits long enough drifts into conflict on its own, and the conflict
+  silently removes its CI. Any PR held for a human should be re-based on a timer,
+  not on someone noticing.
+
 ## Progress Update as of 2026-08-22 04:35 Pacific
 *(Most recent updates at top)*
 
