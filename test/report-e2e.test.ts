@@ -151,7 +151,7 @@ esac
 // everything the test needs plus a cleanup fn.
 // responseJson is widened past its default so a test can add response fields
 // the reporter branches on, e.g. profile_frozen.
-async function setupE2E({ dailyJson, failUsageEnvKey = "", failUsageEnvValue = "", responseJson = { ok: true } as Record<string, unknown>, indexAgents = ["claude", "codex", "pi", "opencode"] }) {
+async function setupE2E({ dailyJson, failUsageEnvKey = "", failUsageEnvValue = "", responseJson = { ok: true } as Record<string, unknown>, profileJson = null as Record<string, unknown> | null, profileStatus = 200, indexAgents = ["claude", "codex", "pi", "opencode"] }) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tkmx-e2e-"));
   // baseEnv sets HOME to tmp, so discoverAgents() reads this index rather than
   // the developer's real one — which would otherwise make these assertions
@@ -169,6 +169,24 @@ async function setupE2E({ dailyJson, failUsageEnvKey = "", failUsageEnvValue = "
     req.on("end", () => {
       if (req.url === "/api/usage" && req.method === "POST") {
         captured = JSON.parse(Buffer.concat(chunks).toString("utf-8"));
+      }
+      // The badge diff GETs the profile before posting. Answering it with
+      // `profileJson` is what lets a test drive "what the server already holds";
+      // the default null keeps every other test on the old shape, where the
+      // reporter reads no badges and warns about nothing.
+      // The path carries a cache-busting query param, so match on the prefix.
+      if (req.method === "GET" && (req.url || "").startsWith("/api/user/")) {
+        // A non-200 answers with a proxy-style HTML error page rather than JSON,
+        // which is what the real failure looks like and what the reporter has to
+        // shrug off without warning about tags it never managed to check.
+        if (profileStatus !== 200) {
+          res.writeHead(profileStatus, { "Content-Type": "text/html" });
+          res.end("<html>error</html>");
+          return;
+        }
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(profileJson ?? {}));
+        return;
       }
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(responseJson));
@@ -824,3 +842,92 @@ test("a frozen profile does not consume the one-shot transition markers", async 
     ctx.cleanup();
   }
 });
+
+// The badge lists are additive server-side, so a name in any machine's .env
+// becomes a permanent chip that only `npm run untag` can remove. These drive the
+// whole path end to end — real reporter process, real GET against a stub profile
+// — because the unit tests in tag-diff.test.ts cannot show that the reporter
+// actually performs the read, warns BEFORE posting, and survives a profile it
+// cannot fetch.
+for (const tc of [
+  {
+    name: "warns before minting a spacing-variant duplicate",
+    env: { TOOLS: "WisprFlow" },
+    profileJson: { tools: "Wispr Flow" },
+    stdoutHas: ['about to add "WisprFlow"', 'duplicate of "Wispr Flow"', "npm run untag -- tools"],
+    stdoutLacks: [] as string[],
+  },
+  {
+    name: "stays silent when this machine's tags are already on the profile",
+    env: { TOOLS: "Cursor,Warp" },
+    profileJson: { tools: "Warp, cursor" },  // order and case both differ
+    stdoutHas: [] as string[],
+    stdoutLacks: ["about to add", "adding "],
+  },
+  {
+    name: "reports a genuinely new tag without calling it a duplicate",
+    env: { TOOLS: "Ghostty" },
+    profileJson: { tools: "Cursor" },
+    stdoutHas: ['adding "Ghostty"'],
+    stdoutLacks: ["duplicate"],
+  },
+  {
+    // A profile the client cannot read must not turn into a warning that every
+    // configured tag is new — that would fire on every run and train people to
+    // ignore it. Silence is the correct answer to "I could not check".
+    name: "a profile the server refuses to serve produces no warning at all",
+    env: { TOOLS: "Ghostty" },
+    profileJson: null,
+    profileStatus: 502,
+    stdoutHas: [] as string[],
+    stdoutLacks: ["about to add", "adding \"Ghostty\""],
+  },
+]) {
+  test(`badge diff — ${tc.name}`, async () => {
+    const ctx = await setupE2E({
+      dailyJson: '{"daily":[]}',
+      profileJson: tc.profileJson,
+      // Defaults to 200. The one row that sets 502 is the difference between
+      // "the server holds no badges" and "the client could not find out" — two
+      // states that must produce different behaviour and would otherwise both
+      // be spelled `profileJson: null`.
+      profileStatus: tc.profileStatus ?? 200,
+    });
+    fs.writeFileSync(ENV_PATH, MINIMAL_ENV);
+    try {
+      const result = await runReporter({ ...ctx.baseEnv, ...tc.env });
+      assert.equal(
+        result.status,
+        0,
+        `reporter exited non-zero.\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
+      );
+      for (const line of tc.stdoutHas) {
+        assert.ok(result.stdout.includes(line), `stdout should contain "${line}".\nGot:\n${result.stdout}`);
+      }
+      for (const line of tc.stdoutLacks) {
+        assert.ok(!result.stdout.includes(line), `stdout should NOT contain "${line}".\nGot:\n${result.stdout}`);
+      }
+      // The report itself must still happen — a badge warning is a courtesy on
+      // a report that is going out either way, never a gate on it.
+      const captured = ctx.getCaptured();
+      assert.ok(captured, "server did not capture a POST body");
+      assert.equal(captured.username, "e2euser");
+      // "About to add" is only true while it is still about to happen: the union
+      // is applied the instant the POST lands. Pin the ORDER, not just the
+      // presence — moving the warning after the post would leave every other
+      // assertion here green while making the message a lie.
+      if (tc.stdoutHas.length > 0) {
+        const posted = result.stdout.indexOf("Server responded 200");
+        assert.ok(posted !== -1, `expected the POST to be logged.\nGot:\n${result.stdout}`);
+        for (const line of tc.stdoutHas) {
+          assert.ok(
+            result.stdout.indexOf(line) < posted,
+            `"${line}" must be printed BEFORE the report is posted.\nGot:\n${result.stdout}`,
+          );
+        }
+      }
+    } finally {
+      ctx.cleanup();
+    }
+  });
+}
