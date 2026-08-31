@@ -546,6 +546,32 @@ async function main(): Promise<void> {
   const profileUrl = `https://aiworthusing.com/builder-index/u/${USERNAME}`;
   console.log(`  Profile: ${profileUrl}`);
 
+  // The other half of the nudge loop below, and the reason it exists: a BLANK
+  // field nags every two hours, while a CONFIGURED one used to print nothing at
+  // all. That silence is the whole defect. The scalar profile fields overwrite
+  // whatever the shared profile holds, so a machine nobody remembers — an old
+  // laptop, a second desktop, a box added after the .env was last edited — keeps
+  // republishing its stale copy over a value the builder corrected elsewhere,
+  // every cycle, forever, with nothing anywhere saying which machine did it.
+  // Observed in the wild: a corrected demo_video_url reverted to the old id
+  // within hours, from two machines that were not on the roster the builder had
+  // in mind. Echoing what this machine just published makes the culprit
+  // self-identifying — you read the stale value in this machine's own log
+  // instead of inferring it from a profile that keeps changing back.
+  //
+  // Driven off PROFILE_FIELDS so it cannot drift from what was actually sent
+  // (see the payload loop above, which is the same array under the same
+  // `f.value` guard). AVATAR is echoed alongside them for the same reason it is
+  // in the multi-machine hint's condition: it is not profile prose and has its
+  // own resolver, but it is overwrite-prone in exactly the same way.
+  const published = PROFILE_FIELDS.filter((f) => f.value);
+  if (published.length > 0 || AVATAR_URL) {
+    console.log(`  Published from this machine's .env — these OVERWRITE your shared profile:`);
+    for (const f of published) console.log(`    ${f.env}=${f.value}`);
+    if (AVATAR_URL) console.log(`    AVATAR=${AVATAR_URL}`);
+    console.log(`    Not what you expect? This machine's .env is stale — blank the field here to stop it republishing.`);
+  }
+
   for (const f of PROFILE_FIELDS) {
     if (!f.value && f.nudge) console.log(`  Set ${f.env} in .env — ${f.nudge}`);
   }
