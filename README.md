@@ -215,6 +215,20 @@ The client supports reporting from multiple machines under the same username. Ea
 
 Your [profile page](https://aiworthusing.com/builder-index) shows how many machines you're reporting from.
 
+### Which machine is driving your profile?
+
+Usage is per-machine, but the profile fields (`TOOLS`, `PROJECTS`, `COMMUNITIES`, `ABOUT`, `HN_USERNAME`, `DEMO_VIDEO_URL`, `AVATAR`) describe *you*, and each report **overwrites** them with whatever the reporting machine's `.env` holds. So a machine you've forgotten about — an old laptop, a second desktop, a box added after you last edited `.env` — republishes its stale copy over a value you corrected elsewhere, every cycle.
+
+Every report now echoes what it just published, so the culprit identifies itself in its own log:
+
+```
+  Published from this machine's .env — these OVERWRITE your shared profile:
+    DEMO_VIDEO_URL=https://youtu.be/old-video-id
+    Not what you expect? This machine's .env is stale — blank the field here to stop it republishing.
+```
+
+Blank the field on every machine but one. Blank means "leave my profile alone" — it is omitted from the report entirely, and that machine still reports its usage normally.
+
 ### Aggregating from synced remote machines
 
 If you already sync `~/.claude` from other machines to a central location (e.g. via rsync, Syncthing, or a tool like [engineering-notebook](https://github.com/obra/engineering-notebook)), you can aggregate all of them into a single report without installing the client on each machine. Set `EXTRA_CLAUDE_CONFIGS` in `.env` to a comma-separated list of directories, each containing a `projects/` subdirectory of Claude Code JSONL sessions:
