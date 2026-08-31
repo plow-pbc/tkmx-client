@@ -1,7 +1,0 @@
-{
-  "version": 1,
-  "slug": "plow-pbc/tkmx-client",
-  "mergeProtected": true,
-  "reason": "plow-pbc/tkmx-client is pinned merge-protected in apps/desktop/shared/merge-protected-repos.json, so Sparkle will never merge there on its own authority.",
-  "remedy": "Hand the merge to a human. Do not retry."
-}

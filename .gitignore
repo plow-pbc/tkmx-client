@@ -17,3 +17,6 @@ dist/
 *.db
 .beads-credential-key
 .beads/proxieddb/
+
+# Sparkle agent worktree metadata (written by the desktop app, not repo content)
+.sparkle/
