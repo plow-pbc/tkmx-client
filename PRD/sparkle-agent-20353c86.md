@@ -1,5 +1,43 @@
 # Progress — sparkle/agent-20353c86-ff69-4bd2-bd78-66300b7da550
 
+## Progress Update as of 2026-08-31, evening Pacific
+*(Most recent updates at top)*
+
+### Summary of changes since last update
+Fixed builder-index-client-trk. The agentsview resolver probed two ABSOLUTE
+system install paths that no amount of HOME/PATH isolation could mask, so any
+machine with agentsview installed failed the tests asserting its absence. Made
+the system candidate list injectable and pointed the tests at it. Local suite
+went 240 pass / 32 fail -> 243 pass / 29 fail; all 29 remaining failures are
+better-sqlite3 (builder-index-client-cvq), a single root cause.
+
+### Detail of changes made:
+- `reporter/agentsview.ts`: extracted the two quickstart install locations into
+  `SYSTEM_CANDIDATES` and added an optional `systemCandidates` field to
+  `ResolveDeps`, defaulted via `?? SYSTEM_CANDIDATES`. Production calls omit it,
+  so behavior is byte-identical; tests pass `[]` to opt out. Exported
+  `isExecutableFile` so tests keep REAL filesystem semantics rather than
+  substituting a fake and testing less than production does.
+- `test/agentsview.test.ts`: added `resolveIsolated()` and repointed all 7 call
+  sites in the `resolveAgentsview` block at it.
+- Verified: typecheck clean; the 4 previously-failing `resolveAgentsview` cases
+  now pass ON A MACHINE THAT HAS agentsview installed (v0.33.1 at
+  /usr/local/bin), which is the exact condition that broke them.
+
+### Beads activity:
+- Claimed and closed builder-index-client-trk.
+- Commented on builder-index-client-cvq with the exact compiler evidence.
+
+### Potential concerns to address:
+- The suite is still red locally, now from ONE cause: better-sqlite3 11.10.0
+  will not compile against Node 26.4.0 (node-gyp 12.4.0, `make` exit 2), and
+  there is no prebuild for this ABI. 28 of 29 failures are downstream of
+  `writeFakeIndex` opening a sqlite DB. Until cvq is resolved, no agent on this
+  repo can honestly run the local gate — which is a quality-process problem, not
+  just an inconvenience.
+- I did NOT bump the dependency: changing package.json/package-lock.json on a
+  public repo is a human call, and CI is green on whatever Node it pins.
+
 ## Progress Update as of 2026-08-31, later Pacific
 *(Most recent updates at top)*
 

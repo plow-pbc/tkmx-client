@@ -48,13 +48,22 @@ interface ResolveDeps {
   platform: NodeJS.Platform;
   env: NodeJS.ProcessEnv;
   isExecutable: (p: string) => boolean;
+  // System-wide install locations to probe, injectable so a caller can opt
+  // out of them. Production omits it and gets SYSTEM_CANDIDATES. Tests pass
+  // [] because these are ABSOLUTE paths: no amount of HOME/PATH isolation
+  // hides a real agentsview at /usr/local/bin, so a developer who has the
+  // tool installed would otherwise fail the cases that assert absence.
+  systemCandidates?: string[];
 }
+
+// Matches the quickstart's install locations.
+const SYSTEM_CANDIDATES = ["/opt/homebrew/bin/agentsview", "/usr/local/bin/agentsview"];
 
 function uniqueDefined(values: Array<string | undefined>): string[] {
   return [...new Set(values.filter((value): value is string => Boolean(value)))];
 }
 
-function isExecutableFile(p: string): boolean {
+export function isExecutableFile(p: string): boolean {
   try {
     if (!fs.statSync(p).isFile()) return false;
     fs.accessSync(p, fs.constants.X_OK);
@@ -78,7 +87,7 @@ function agentsviewCandidates(deps: ResolveDeps): string[] {
     candidates.push(p.join(home, ".local", "bin", name));
     candidates.push(p.join(home, ".agentsview", "bin", name));
   }
-  candidates.push("/opt/homebrew/bin/agentsview", "/usr/local/bin/agentsview");
+  candidates.push(...(deps.systemCandidates ?? SYSTEM_CANDIDATES));
   return uniqueDefined(candidates);
 }
 

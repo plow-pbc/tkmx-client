@@ -474,14 +474,28 @@ describe("resolveAgentsview", () => {
     }
   }
 
+  // Resolve exactly as production does — real filesystem, real env — but with
+  // the system-wide install locations opted out. Those are absolute paths that
+  // withIsolatedEnv cannot mask, so without this a developer (or agent) whose
+  // machine actually has agentsview at /usr/local/bin or /opt/homebrew/bin
+  // fails every case below that asserts absence. See builder-index-client-trk.
+  function resolveIsolated() {
+    const { resolveAgentsviewWith, isExecutableFile } = require("../reporter/agentsview");
+    return resolveAgentsviewWith({
+      platform: process.platform,
+      env: process.env,
+      isExecutable: isExecutableFile,
+      systemCandidates: [],
+    });
+  }
+
   function localBinCandidate(tmp) {
     return path.join(tmp, ".local", "bin", process.platform === "win32" ? "agentsview.exe" : "agentsview");
   }
 
   it("returns null when no candidate path exists", () => {
     withIsolatedEnv(() => {
-      const { resolveAgentsview } = require("../reporter/agentsview");
-      assert.equal(resolveAgentsview(), null);
+      assert.equal(resolveIsolated(), null);
     });
   });
 
@@ -489,8 +503,7 @@ describe("resolveAgentsview", () => {
     withIsolatedEnv((tmp) => {
       const fake = localBinCandidate(tmp);
       writeExec(fake);
-      const { resolveAgentsview } = require("../reporter/agentsview");
-      assert.equal(resolveAgentsview(), fake);
+      assert.equal(resolveIsolated(), fake);
     });
   });
 
@@ -500,16 +513,14 @@ describe("resolveAgentsview", () => {
       fs.mkdirSync(path.dirname(fake), { recursive: true });
       fs.writeFileSync(fake, "#!/bin/sh\n");
       fs.chmodSync(fake, 0o644); // not executable
-      const { resolveAgentsview } = require("../reporter/agentsview");
-      assert.equal(resolveAgentsview(), null);
+      assert.equal(resolveIsolated(), null);
     });
   });
 
   it("skips candidates that are directories, not files", () => {
     withIsolatedEnv((tmp) => {
       fs.mkdirSync(path.join(tmp, ".local", "bin", "agentsview"), { recursive: true });
-      const { resolveAgentsview } = require("../reporter/agentsview");
-      assert.equal(resolveAgentsview(), null);
+      assert.equal(resolveIsolated(), null);
     });
   });
 
@@ -520,8 +531,7 @@ describe("resolveAgentsview", () => {
       const candidate = localBinCandidate(tmp);
       writeExec(candidate);
       process.env.AGENTSVIEW_BIN = override;
-      const { resolveAgentsview } = require("../reporter/agentsview");
-      assert.equal(resolveAgentsview(), override);
+      assert.equal(resolveIsolated(), override);
     });
   });
 
@@ -530,8 +540,7 @@ describe("resolveAgentsview", () => {
       const candidate = localBinCandidate(tmp);
       writeExec(candidate);
       process.env.AGENTSVIEW_BIN = "/nonexistent/agentsview";
-      const { resolveAgentsview } = require("../reporter/agentsview");
-      assert.equal(resolveAgentsview(), candidate);
+      assert.equal(resolveIsolated(), candidate);
     });
   });
 
@@ -541,8 +550,7 @@ describe("resolveAgentsview", () => {
       const fake = path.join(pathDir, process.platform === "win32" ? "agentsview.exe" : "agentsview");
       writeExec(fake);
       process.env.PATH = [pathDir, "/usr/bin", "/bin"].join(path.delimiter);
-      const { resolveAgentsview } = require("../reporter/agentsview");
-      assert.equal(resolveAgentsview(), fake);
+      assert.equal(resolveIsolated(), fake);
     });
   });
 
