@@ -11,3 +11,9 @@ node_modules/
 .agentsview-update-check
 dist/
 *.tsbuildinfo
+
+# Sparkle agent worktrees get a .sparkle/ marker written by the desktop app.
+# Without this the worktree always reads as dirty and agent teardown refuses
+# with "holds uncommitted changes". It is currently papered over by a
+# machine-local .git/info/exclude entry, which no fresh clone inherits.
+.sparkle/
