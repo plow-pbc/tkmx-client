@@ -1,0 +1,42 @@
+{
+  "_what": "Canonical values for the Builder Index profile, and the checked-in evidence record behind four repeat investigations into why they keep changing. test/profile-drift.test.ts asserts the live profile against this file. When a value here is WRONG rather than the live one, fix it here in a reviewable one-line diff — that diff is the audit trail.",
+  "profile": "DROdio",
+  "api_url": "https://tokenmaxxing.odio.dev/api/user/DROdio",
+  "human_url": "https://aiworthusing.com/builder-index/u/DROdio",
+  "recorded_at": "2026-08-20",
+  "owner": {
+    "client_id": "174d238d9bdd6da534becd7d47556e1e",
+    "what": "Sparkle's native reporter on the founder's main Mac (Apple M5 Max, 18-core).",
+    "why": "Prose describes the PERSON, not the machine, but the server takes it from whichever client last POSTed. One client_id is designated the owner; prose arriving from any other is drift by definition. The failure report names every client and which one REPORTED most recently, so that question stops being re-investigated.",
+    "caveat": "NEWEST-WRITE-WINS IS NOT THE RULE AND MUST NOT BE INFERRED FROM THIS FILE. On 2026-08-20 the correct demo_video_url sat on a machine that had not reported since 2026-08-14, while a box reporting every two hours overwrote it with a stale one — the freshest REPORTER was the wrong machine. Note the word: updated_at measures reporting, never writing, and the guard's output says reporter throughout for that reason. Ownership is declared here, never derived from a timestamp."
+  },
+  "strict": {
+    "_why": "Scalar fields. server/db.ts buildApiKeyFieldOps puts about / hn_username / demo_video_url in SCALAR_API_KEY_FIELDS, whose only guard is `typeof value !== \"string\"` — so an empty string falls through to a plain UPDATE and BLANKS the stored value. These are the fields a misconfigured client can destroy, so they are pinned exactly.",
+    "demo_video_url": "https://www.youtube.com/watch?v=XneIFwA-iOA"
+  },
+  "strict_case_insensitive": {
+    "_why": "Pinned to a value but compared without regard to case. hn_username was observed flipping \"drodio\" → \"DROdio\" inside one hour on 2026-08-20, while demo_video_url held and every other signal stayed healthy — that is an edit, not a regression. HN resolves accounts case-insensitively, so both spellings name the same person and neither is more correct. Asserting the casing would have failed this guard over a change that cost nothing, and a guard that cries wolf is one somebody eventually deletes. Pin the identity; do not pin the casing.",
+    "hn_username": "drodio"
+  },
+  "non_empty": {
+    "_why": "Asserted present-and-non-blank rather than pinned to an exact string, because these change through legitimate editing far more often than through drift. Blanking is the failure mode that actually costs something, and it is what this catches. `about` is scalar (destroyable by an empty string); tools and projects are TAG_API_KEY_FIELDS, which merge additively and cannot be blanked by a report — a blank one means something other than a report did it.",
+    "fields": [
+      "about",
+      "tools",
+      "projects"
+    ]
+  },
+  "not_asserted": {
+    "communities": "Reads \"\" live as of 2026-08-20. communities is a TAG field, so no report can have blanked it — a report either merges a value in or is ignored. Something outside the reporting path emptied it and that has never been explained. Recorded here rather than asserted, so the guard does not fail on day one over an open question; see the bead."
+  },
+  "known_bad": {
+    "_why": "Values seen live that are known to be wrong. A hit here upgrades the failure message from 'drifted' to 'this is the specific regression that has now recurred', which is the difference between a five-minute triage and a fifth investigation.",
+    "demo_video_url": [
+      "https://www.youtube.com/watch?v=67vGhYrCdrM"
+    ]
+  },
+  "protocol": {
+    "_why": "tkmx-server parses client_version as BARE SEMVER and FREEZES any profile below minimum_client_version. The freeze is SILENT — the POST returns 200 with ok:true and only a profile_frozen flag — so a frozen profile looks exactly like a healthy one until someone notices the numbers stopped moving. The guard compares the server's minimum against each machines[].client_version in the LIVE response, so no version is pinned anywhere for it to track. That matters because the declared prose owner below is Sparkle's native reporter, whose version is pinned in the repo named in also_pinned_in and cannot be read from this one \u2014 comparing against this repo's package.json covered every machine EXCEPT the only one whose freeze actually stalls the prose. The live response already carries the real number for every reporting client, and the failure names the frozen box.",
+    "also_pinned_in": "sparkle: apps/desktop/src-tauri/src/builder_index.rs BUILDER_INDEX_PROTOCOL_VERSION"
+  }
+}
