@@ -88,29 +88,18 @@ test(".env.example stays committable despite the broad .env* rule", () => {
 // under a plain `check-ignore` that workaround makes this test pass on a
 // checkout where the committed fix was never made, which is the one outcome
 // that would leave the next agent stranded with a green suite.
-function ignoreSource(relativePath: string): string | null {
-  try {
-    const out = execFileSync("git", ["check-ignore", "-v", "--no-index", relativePath], {
-      cwd: REPO_ROOT,
-      encoding: "utf8",
-    });
-    // `<source>:<line>:<pattern>\t<path>`. Peel the two fixed trailing fields off
-    // the front half rather than splitting on the first colon — the source can be
-    // an absolute path (git reports .git/info/exclude that way), and on Windows
-    // that starts `C:\`, which a first-colon split would truncate to `C`.
-    const front = out.split("\t")[0];
-    return front.split(":").slice(0, -2).join(":");
-  } catch (err) {
-    if ((err as { status?: number }).status !== 1) throw err;
-    return null;
-  }
-}
-
+//
+// `check-ignore -v` prints `<source>:<line>:<pattern>\t<path>`; a local override
+// reports an absolute path ending `/info/exclude` instead. A path that is not
+// ignored at all exits 1, which throws here — also a failure, which is correct.
 test("Sparkle's per-worktree marker is ignored by the committed .gitignore", () => {
-  const source = ignoreSource(".sparkle/merge-policy.json");
-  assert.ok(source, ".sparkle/ must be git-ignored — an unignored per-worktree marker leaves every agent worktree dirty and blocks its teardown");
-  assert.ok(
-    source.endsWith(".gitignore"),
-    `.sparkle/ must be ignored by the committed .gitignore, not by a local override — got "${source}". A .git/info/exclude workaround only helps the machine that made it.`,
+  const output = execFileSync(
+    "git", ["check-ignore", "-v", "--no-index", ".sparkle/merge-policy.json"],
+    { cwd: REPO_ROOT, encoding: "utf8" },
+  );
+  assert.match(
+    output,
+    /(?:^|[\\/])\.gitignore:/,
+    `.sparkle/ must be ignored by the committed .gitignore, not by a local override. A .git/info/exclude workaround only helps the machine that made it.`,
   );
 });
