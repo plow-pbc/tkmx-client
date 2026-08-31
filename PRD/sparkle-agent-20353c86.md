@@ -1,5 +1,40 @@
 # Progress — sparkle/agent-20353c86-ff69-4bd2-bd78-66300b7da550
 
+## Progress Update as of 2026-08-31, later Pacific
+*(Most recent updates at top)*
+
+### Summary of changes since last update
+Ran the project's quality gates for the first time on this branch. Typecheck is
+clean; the test suite is NOT — 32 of 276 fail on current main, independent of
+this branch (which touches no source). Narrowed the cause and recorded it on the
+existing bead. Also made the `.sparkle/` worktree-dirtiness workaround durable.
+
+### Detail of changes made:
+- `npm run typecheck` — PASSES clean (`tsc --noEmit` + test project).
+- `npm test` — tests 276, pass 240, **fail 32**, cancelled 4. Pre-existing: this
+  branch's diff vs main is only `.gitignore`, `AGENTS.md`, `CLAUDE.md` and
+  scaffolding dirs, so no source is implicated.
+- Disproved the obvious PATH-leak theory for builder-index-client-trk: re-running
+  with agentsview stripped from PATH gave pass 239 / fail 33 — no improvement.
+  Real mechanism is `reporter/agentsview.ts:81`, which hard-codes the absolute
+  candidates `/opt/homebrew/bin/agentsview` and `/usr/local/bin/agentsview`.
+  These cannot be overridden by env, so any machine with agentsview installed
+  fails the four `resolveAgentsview` tests that assert absence. Recorded on trk.
+- Committed `.sparkle/` into `.gitignore` (`c357dd0`). It was only covered by a
+  machine-local `.git/info/exclude`, which no fresh clone inherits.
+
+### Beads activity:
+- Commented on builder-index-client-trk with the reproduction, the disproved
+  theory, the real mechanism, and a suggested injectable-candidates fix.
+
+### Potential concerns to address:
+- A red suite on main means no agent on this repo can honestly claim "tests pass"
+  before committing. That undercuts the standing quality gate for everyone, not
+  just this branch.
+- The `collectCursorStats` failures look like the same class (real local Cursor
+  DB leaking in) — `reporter/cursor.ts:9` `getCursorDbPath` is worth the same
+  injectability check.
+
 ## Progress Update as of 2026-08-31, Pacific
 *(Most recent updates at top)*
 

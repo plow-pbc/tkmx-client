@@ -17,3 +17,9 @@ dist/
 *.db
 .beads-credential-key
 .beads/proxieddb/
+
+# Sparkle agent worktrees get a .sparkle/ marker written by the app. Without
+# this, every agent worktree reads as dirty and worker teardown refuses with
+# "holds uncommitted changes". Ignoring it here makes the fix durable rather
+# than depending on a machine-local .git/info/exclude.
+.sparkle/
