@@ -364,6 +364,16 @@ COMMUNITIES=bloomberg-ai-engineering,agentcribs-community
 > npm run untag -- projects "Old Project"
 > ```
 >
+> **The reporter warns you before it mints one.** Each report reads your stored lists first and says what it is about to add — and flags an entry that reads as a duplicate of one already there:
+>
+> ```
+>   ⚠️  TOOLS: about to add "WisprFlow", which looks like a duplicate of "Wispr Flow" already on your profile.
+>       Badge lists are additive: once added, a chip stays until you run `npm run untag -- tools "<exact text>"`.
+>       Fix the spelling in this machine's .env before the next report to avoid minting it.
+> ```
+>
+> The warning is printed before the report is posted, so there is a window to fix `.env` first. It is best-effort: if the profile can't be read, the report still goes out and nothing is warned about.
+>
 > Points worth knowing:
 >
 > - **Clear it from every machine first, or it comes back.** Removal takes the badge off the server; it does not stop a machine from sending it again. Any machine whose `.env` (or exported shell variable) still lists that badge will re-add it on its next report, and reporting is usually running on a timer. Delete it from **every** reporting configuration, then remove it — otherwise you're racing the scheduler.

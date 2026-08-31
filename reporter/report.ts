@@ -23,6 +23,8 @@ import { maybeAutoUpdateAgentsview } from "./agentsview-update";
 import { loadState, saveState, computeTransitionMarkers, gateOnSnapshotHash } from "./reporting-state";
 import { STATS_WINDOW_DAYS, formatSinceStr } from "./window";
 import { resolveAvatarUrl } from "./avatar";
+import { buildListUrl, TAG_FIELDS } from "./untag";
+import { diffTags, formatTagDiff, parseProfileTags, parseTagList } from "./tag-diff";
 import { errMessage } from "./errors";
 
 // PROJECT_ROOT is the actual checked-out repo (not dist/). After build, this
@@ -293,6 +295,67 @@ interface ServerResponse {
 // devs can self-report honestly and learn from each other's setups. Please don't
 // pee in the punchbowl. If you want to add support for a new tool, we'd love a PR:
 // https://github.com/srosro/tkmx-client
+// Reads the profile the server currently holds, for the badge diff below.
+//
+// BEST-EFFORT BY CONSTRUCTION. This is a courtesy check on a report that is
+// going to happen either way, so every failure path returns null and the report
+// proceeds: a warning nobody gets is a far better outcome than a scheduled
+// report that stops running because a read-only GET timed out. The timeout is
+// explicit because the default is no timeout at all — a hung connection would
+// otherwise stall a launchd/systemd job indefinitely, which is exactly the kind
+// of silent stoppage this client is supposed to avoid.
+//
+// The URL is the one `npm run untag -- --list` uses, cache-buster included: the
+// profile read is served `cache-control: public` with no max-age, so a plain GET
+// can hand back a copy from before the last report and invent additions that are
+// already there.
+function fetchProfileBody(timeoutMs = 5000): Promise<string | null> {
+  const url = buildListUrl(SERVER_URL, USERNAME as string, Date.now());
+  const transport = url.protocol === "https:" ? https : http;
+
+  return new Promise((resolve) => {
+    const req = transport.request(url, { method: "GET" }, (res) => {
+      let body = "";
+      res.on("data", (chunk) => (body += chunk));
+      res.on("end", () => resolve(res.statusCode === 200 ? body : null));
+    });
+    req.setTimeout(timeoutMs, () => req.destroy());
+    req.on("error", () => resolve(null));
+    req.end();
+  });
+}
+
+// Says what this report is about to ADD to the badge lists, before it adds it.
+//
+// Runs only when this machine actually configures one of the lists — a machine
+// that leaves them blank posts no badges and has nothing to warn about, and
+// making it fetch a profile it cannot affect would be a request per report for
+// no reason.
+async function warnAboutNewTags(body: ReportBody): Promise<void> {
+  const localByField = new Map<string, string[]>();
+  for (const field of TAG_FIELDS) {
+    // TAG_FIELDS is a const tuple, so `field` is the literal union and this
+    // indexes ReportBody directly — no cast, and adding a fourth badge list to
+    // one of the two lists without the other stops compiling rather than
+    // silently going unchecked.
+    const raw = body[field];
+    if (raw !== undefined) localByField.set(field, parseTagList(raw));
+  }
+  if ([...localByField.values()].every((tags) => tags.length === 0)) return;
+
+  const profileBody = await fetchProfileBody();
+  // Silent on failure: see fetchProfileBody. Warning on a read that did not
+  // happen would report every configured tag as new, every run.
+  if (profileBody === null) return;
+
+  const live = parseProfileTags(profileBody, TAG_FIELDS);
+  const lines: string[] = [];
+  for (const [field, localTags] of localByField) {
+    lines.push(...formatTagDiff(field, diffTags(localTags, live[field] || [])));
+  }
+  for (const line of lines) console.log(line);
+}
+
 function postUsage(payload: string): Promise<ServerResponse> {
   const url = new URL("/api/usage", SERVER_URL);
   const transport = url.protocol === "https:" ? https : http;
@@ -523,6 +586,10 @@ async function main(): Promise<void> {
   const markers = computeTransitionMarkers(priorState, currentState);
   if (markers.clear_dev_stats) body.clear_dev_stats = true;
   if ("session_stats" in markers) body.session_stats = null;
+
+  // Before the POST, not after: the union happens server-side the moment this
+  // request lands, so "about to add" is only true while it is still true.
+  await warnAboutNewTags(body);
 
   const response = await postUsage(JSON.stringify(body));
   // A frozen profile answers 200 but stays on its last snapshot, so nothing we
