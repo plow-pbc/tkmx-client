@@ -11,3 +11,6 @@ node_modules/
 .agentsview-update-check
 dist/
 *.tsbuildinfo
+
+# Sparkle agent worktree metadata (written by the desktop app, not repo content)
+.sparkle/
