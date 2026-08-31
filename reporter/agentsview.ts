@@ -4,6 +4,7 @@ import * as path from "node:path";
 import { errMessage } from "./errors";
 import { LAUNCHD_LABEL } from "./install";
 import Database from "better-sqlite3";
+import { openDatabaseWith } from "./sqlite";
 import type { DailyUsage, ModelBreakdown } from "./usage";
 
 interface RawMoney {
@@ -185,7 +186,9 @@ export function discoverAgents(env: NodeJS.ProcessEnv = process.env): string[] {
   // failure; discovery aborts the run either way, so a catch buys nothing.)
   let db: Database.Database;
   try {
-    db = new Database(dbPath, { readonly: true });
+    // openDatabaseWith turns a native-addon ABI mismatch into a message that
+    // names the running Node and the pinned one; anything else is unchanged.
+    db = openDatabaseWith((p, o) => new Database(p, o), dbPath, { readonly: true });
   } catch (err) {
     throw new Error(`cannot read the AgentsView index at ${dbPath}: ${errMessage(err)}`);
   }

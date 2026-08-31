@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import Database from "better-sqlite3";
+import { openDatabase } from "../reporter/sqlite";
 
 // Minimal stand-in for the AgentsView index that discoverAgents() reads.
 // Only the two columns discovery touches; the real sessions table is far
@@ -8,7 +8,7 @@ import Database from "better-sqlite3";
 // AgentsView's schema for no added guarantee.
 export function writeFakeIndex(dataDir: string, agents: string[]): void {
   fs.mkdirSync(dataDir, { recursive: true });
-  const db = new Database(path.join(dataDir, "sessions.db"));
+  const db = openDatabase(path.join(dataDir, "sessions.db"));
   try {
     db.exec("CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, agent TEXT)");
     const insert = db.prepare("INSERT OR REPLACE INTO sessions (id, agent) VALUES (?, ?)");
