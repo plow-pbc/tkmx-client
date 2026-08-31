@@ -1,5 +1,43 @@
 # Progress — sparkle/agent-20353c86-ff69-4bd2-bd78-66300b7da550
 
+## Progress Update as of 2026-08-31, overnight Pacific
+*(Most recent updates at top)*
+
+### Summary of changes since last update
+Corrected an earlier wrong claim of mine and replaced it with a measurement. The
+suite IS runnable locally — under Node 22, which is what CI pins — and under that
+Node the branch sits at 275/276. The single remaining failure is already fixed by
+PR 70, so I contributed evidence to PR 70 rather than writing a third variant.
+
+### Detail of changes made:
+- CORRECTION: I previously said the local gate could not be run at all because of
+  better-sqlite3. Wrong. `export PATH="$HOME/.nvm/versions/node/v22.0.0/bin:$PATH"`
+  then `npm ci` exits 0 and the suite runs. Node 22 is CI's pin
+  (.github/workflows/ci.yml:34). The accurate claim is narrower: the repo is
+  broken on the machine's DEFAULT Node 26, not unrunnable.
+- Measured, on a box that HAS agentsview 0.33.1 installed, under Node 22:
+  main unmodified 271 pass / 5 fail; with the resolver fix 275 pass / 1 fail.
+- Diagnosed the last failure: `collectSessionStats returns null when binary
+  missing` sets a bogus AGENTSVIEW_BIN, which the resolver IGNORES rather than
+  treating as fatal, so it falls through to the absolute candidates and finds the
+  real binary. Same bug as trk, one layer up.
+- Checked PR 70 before building anything: it already stubs `resolveAgentsview`
+  for exactly that case, with the same reasoning. So I wrote no code and instead
+  posted the measurements as a comment on PR 70 — the useful contribution there
+  is evidence for the reviewer, not a third implementation.
+
+### Beads activity:
+- Corrected builder-index-client-cvq (workaround exists; severity is narrower
+  than I claimed) and added the measurement table to builder-index-client-trk.
+- Stored two memories: the .sparkle/ triplicate (do not open a fourth PR), and a
+  standing rule to check open PRs and remote branches before writing code.
+
+### Potential concerns to address:
+- I got the cvq severity wrong by reporting a symptom I had not tried to work
+  around. Worth generalising: measure the workaround before escalating.
+- PR 70 is now demonstrably the single change that takes the suite green on a
+  developer machine, and it has been open since Aug 17.
+
 ## Progress Update as of 2026-08-31, late night Pacific
 *(Most recent updates at top)*
 
