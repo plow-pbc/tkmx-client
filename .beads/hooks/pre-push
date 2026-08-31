@@ -1,0 +1,73 @@
+#!/bin/sh
+# roborev pre-push gate — block pushing commits that carry an UNRESOLVED fail (F)
+# review verdict. Installed in roborev's global core.hooksPath so it applies to
+# every repo/worktree. FAIL-OPEN by design: any uncertainty (no roborev, daemon
+# down, parse failure, no python3) allows the push. Escape hatch: git push --no-verify.
+ROBOREV="$HOME/.local/bin/roborev"
+[ -x "$ROBOREV" ] || ROBOREV=$(command -v roborev 2>/dev/null)
+[ -x "$ROBOREV" ] || exit 0
+
+# SHAs being pushed = new commits not already on any remote.
+shas=""
+while read -r _lref lsha _rref _rsha; do
+    [ "$lsha" = "0000000000000000000000000000000000000000" ] && continue
+    new=$(git rev-list "$lsha" --not --remotes 2>/dev/null) || exit 0
+    shas="$shas $new"
+done
+[ -n "$(printf '%s' "$shas" | tr -d ' ')" ] || exit 0
+
+json=$($ROBOREV list --json --open --limit 1000 2>/dev/null) || exit 0
+blocked=$(printf '%s' "$json" | ROBOREV_SHAS="$shas" python3 -c '
+import sys, json, os
+try: data = json.load(sys.stdin)
+except Exception: sys.exit(0)
+pushed = set(os.environ.get("ROBOREV_SHAS","").split())
+for r in data:
+    if r.get("verdict")=="F" and not r.get("closed") and r.get("status")=="done" and r.get("git_ref") in pushed:
+        print("  %s  %s  (job %s)" % (r.get("git_ref","")[:9], (r.get("commit_subject") or "")[:68], r.get("id")))
+' 2>/dev/null) || exit 0
+
+if [ -n "$blocked" ]; then
+    echo "" >&2
+    echo "roborev: push blocked — these commits have unresolved FAIL (F) reviews:" >&2
+    echo "$blocked" >&2
+    echo "" >&2
+    echo "  Triage:  roborev show <sha>   then fix the issue or  roborev close <job>" >&2
+    echo "  Bypass:  git push --no-verify" >&2
+    echo "" >&2
+    exit 1
+fi
+exit 0
+
+# --- BEGIN BEADS INTEGRATION v1.1.2 ---
+# This section is managed by beads. Do not remove these markers.
+if command -v bd >/dev/null 2>&1; then
+  export BD_GIT_HOOK=1
+  _bd_timeout=${BEADS_HOOK_TIMEOUT:-300}
+  _bd_used_perl=0
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$_bd_timeout" bd hooks run pre-push "$@"
+    _bd_exit=$?
+  elif command -v gtimeout >/dev/null 2>&1; then
+    gtimeout "$_bd_timeout" bd hooks run pre-push "$@"
+    _bd_exit=$?
+  elif command -v perl >/dev/null 2>&1; then
+    _bd_used_perl=1
+    perl -e 'alarm shift; exec @ARGV' "$_bd_timeout" bd hooks run pre-push "$@"
+    _bd_exit=$?
+  else
+    echo >&2 "beads: hook 'pre-push' running without timeout; install coreutils or perl to enable BEADS_HOOK_TIMEOUT"
+    bd hooks run pre-push "$@"
+    _bd_exit=$?
+  fi
+  if [ $_bd_exit -eq 124 ] || { [ $_bd_used_perl -eq 1 ] && [ $_bd_exit -eq 142 ]; }; then
+    echo >&2 "beads: hook 'pre-push' timed out after ${_bd_timeout}s — continuing without beads"
+    _bd_exit=0
+  fi
+  if [ $_bd_exit -eq 3 ]; then
+    echo >&2 "beads: database not initialized — skipping hook 'pre-push'"
+    _bd_exit=0
+  fi
+  if [ $_bd_exit -ne 0 ]; then exit $_bd_exit; fi
+fi
+# --- END BEADS INTEGRATION v1.1.2 ---
