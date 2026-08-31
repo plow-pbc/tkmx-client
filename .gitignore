@@ -11,3 +11,13 @@ node_modules/
 .agentsview-update-check
 dist/
 *.tsbuildinfo
+
+# Agent tooling: .claude/settings.json is shared, settings.local.json is not —
+# it holds machine-absolute paths and is per-developer.
+.claude/settings.local.json
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
+.beads/proxieddb/
