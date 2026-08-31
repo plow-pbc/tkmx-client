@@ -54,7 +54,9 @@ function uniqueDefined(values: Array<string | undefined>): string[] {
   return [...new Set(values.filter((value): value is string => Boolean(value)))];
 }
 
-function isExecutableFile(p: string): boolean {
+// Exported so tests can fence it to a sandbox dir without re-implementing it —
+// a copied predicate would leave the cases that pin it passing on their own copy.
+export function isExecutableFile(p: string): boolean {
   try {
     if (!fs.statSync(p).isFile()) return false;
     fs.accessSync(p, fs.constants.X_OK);
