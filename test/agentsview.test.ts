@@ -451,15 +451,22 @@ describe("resolveAgentsview", () => {
   // ambient AGENTSVIEW_BIN env var. Tests that need $PATH to find
   // something set PATH explicitly; the default empty PATH makes
   // `which agentsview` miss.
+  //
+  // AGENTSVIEW_SYSTEM_CANDIDATES is emptied for the same reason: without it
+  // the absolute /opt/homebrew and /usr/local candidates are probed on the
+  // host, so a developer with agentsview really installed there saw these
+  // cases resolve to their own binary and fail.
   function withIsolatedEnv(fn) {
     const origHome = process.env.HOME;
     const origUserProfile = process.env.USERPROFILE;
     const origPath = process.env.PATH;
     const origBin = process.env.AGENTSVIEW_BIN;
+    const origSystem = process.env.AGENTSVIEW_SYSTEM_CANDIDATES;
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tkmx-resolve-"));
     process.env.HOME = tmp;
     process.env.USERPROFILE = tmp;
     process.env.PATH = "";
+    process.env.AGENTSVIEW_SYSTEM_CANDIDATES = "";
     delete process.env.AGENTSVIEW_BIN;
     try {
       return fn(tmp);
@@ -470,6 +477,8 @@ describe("resolveAgentsview", () => {
       process.env.PATH = origPath;
       if (origBin === undefined) delete process.env.AGENTSVIEW_BIN;
       else process.env.AGENTSVIEW_BIN = origBin;
+      if (origSystem === undefined) delete process.env.AGENTSVIEW_SYSTEM_CANDIDATES;
+      else process.env.AGENTSVIEW_SYSTEM_CANDIDATES = origSystem;
       fs.rmSync(tmp, { recursive: true, force: true });
     }
   }
@@ -546,6 +555,81 @@ describe("resolveAgentsview", () => {
     });
   });
 
+  it("probes an install location named by AGENTSVIEW_SYSTEM_CANDIDATES", () => {
+    withIsolatedEnv((tmp) => {
+      const prefix = path.join(tmp, "opt", "bin", process.platform === "win32" ? "agentsview.exe" : "agentsview");
+      writeExec(prefix);
+      process.env.AGENTSVIEW_SYSTEM_CANDIDATES = prefix;
+      const { resolveAgentsview } = require("../reporter/agentsview");
+      assert.equal(resolveAgentsview(), prefix);
+    });
+  });
+
+});
+
+// The absolute install locations are the part of resolution that HOME and
+// PATH isolation cannot reach, so they get their own host-independent cases:
+// injected isExecutable records exactly which paths were probed.
+describe("resolveAgentsviewWith — system install candidates", () => {
+  function probeRecorder(present: string[] = []) {
+    const probed: string[] = [];
+    return {
+      probed,
+      isExecutable: (p: string) => {
+        probed.push(p);
+        return present.includes(p);
+      },
+    };
+  }
+
+  it("probes the documented install locations when the env var is unset", () => {
+    const rec = probeRecorder();
+    const found = resolveAgentsviewWith({
+      platform: "linux",
+      env: { HOME: "/home/dev", PATH: "" },
+      isExecutable: rec.isExecutable,
+    });
+    assert.equal(found, null);
+    assert.ok(rec.probed.includes("/opt/homebrew/bin/agentsview"));
+    assert.ok(rec.probed.includes("/usr/local/bin/agentsview"));
+  });
+
+  it("probes none of them when AGENTSVIEW_SYSTEM_CANDIDATES is empty", () => {
+    const rec = probeRecorder(["/usr/local/bin/agentsview"]);
+    const found = resolveAgentsviewWith({
+      platform: "linux",
+      env: { HOME: "/home/dev", PATH: "", AGENTSVIEW_SYSTEM_CANDIDATES: "" },
+      isExecutable: rec.isExecutable,
+    });
+    assert.equal(found, null);
+    assert.ok(!rec.probed.includes("/usr/local/bin/agentsview"));
+  });
+
+  it("replaces the defaults with a delimited list, in order", () => {
+    const rec = probeRecorder(["/second/agentsview"]);
+    const found = resolveAgentsviewWith({
+      platform: "linux",
+      env: {
+        HOME: "/home/dev",
+        PATH: "",
+        AGENTSVIEW_SYSTEM_CANDIDATES: "/first/agentsview:/second/agentsview",
+      },
+      isExecutable: rec.isExecutable,
+    });
+    assert.equal(found, "/second/agentsview");
+    assert.ok(!rec.probed.includes("/usr/local/bin/agentsview"));
+    assert.ok(rec.probed.indexOf("/first/agentsview") < rec.probed.indexOf("/second/agentsview"));
+  });
+
+  it("still lets AGENTSVIEW_BIN win over a system candidate", () => {
+    const rec = probeRecorder(["/nix/store/agentsview", "/usr/local/bin/agentsview"]);
+    const found = resolveAgentsviewWith({
+      platform: "linux",
+      env: { HOME: "/home/dev", PATH: "", AGENTSVIEW_BIN: "/nix/store/agentsview" },
+      isExecutable: rec.isExecutable,
+    });
+    assert.equal(found, "/nix/store/agentsview");
+  });
 });
 
 // The Windows branch runs on any host by injecting platform/env/isExecutable,

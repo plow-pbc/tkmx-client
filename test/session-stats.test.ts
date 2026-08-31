@@ -6,7 +6,10 @@ import * as os from "node:os";
 
 // Each case runs with HOME + PATH reset so `resolveAgentsview` can't fall
 // through to a real agentsview install at ~/.local/bin/agentsview (a
-// candidate path) or via `which` on the host's PATH.
+// candidate path) or via `which` on the host's PATH. HOME and PATH do not
+// cover the absolute install locations, so AGENTSVIEW_SYSTEM_CANDIDATES is
+// emptied too — otherwise a developer with agentsview at /usr/local/bin got
+// real stats from the case that asserts none are available.
 //
 // PATH is set to /bin:/usr/bin so shebangs (`#!/usr/bin/env bash`) in the
 // test fixtures can still resolve their interpreter. That's enough surface
@@ -14,6 +17,7 @@ import * as os from "node:os";
 // find anything real.
 const ORIG = {
   AGENTSVIEW_BIN: process.env.AGENTSVIEW_BIN,
+  AGENTSVIEW_SYSTEM_CANDIDATES: process.env.AGENTSVIEW_SYSTEM_CANDIDATES,
   HOME: process.env.HOME,
   PATH: process.env.PATH,
   USERPROFILE: process.env.USERPROFILE,
@@ -26,6 +30,7 @@ beforeEach(() => {
   process.env.HOME = tmpHome;
   process.env.USERPROFILE = tmpHome;
   process.env.PATH = "/bin:/usr/bin";
+  process.env.AGENTSVIEW_SYSTEM_CANDIDATES = "";
   delete process.env.AGENTSVIEW_BIN;
   delete process.env.NODE_OPTIONS;
   delete require.cache[require.resolve("../reporter/session-stats")];
@@ -35,6 +40,8 @@ beforeEach(() => {
 afterEach(() => {
   if (ORIG.AGENTSVIEW_BIN === undefined) delete process.env.AGENTSVIEW_BIN;
   else process.env.AGENTSVIEW_BIN = ORIG.AGENTSVIEW_BIN;
+  if (ORIG.AGENTSVIEW_SYSTEM_CANDIDATES === undefined) delete process.env.AGENTSVIEW_SYSTEM_CANDIDATES;
+  else process.env.AGENTSVIEW_SYSTEM_CANDIDATES = ORIG.AGENTSVIEW_SYSTEM_CANDIDATES;
   process.env.HOME = ORIG.HOME;
   process.env.PATH = ORIG.PATH;
   if (ORIG.USERPROFILE === undefined) delete process.env.USERPROFILE;
