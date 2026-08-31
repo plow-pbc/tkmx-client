@@ -16,6 +16,10 @@ dist/
 # this, `git status` is permanently dirty and worker spin-down refuses.
 .sparkle/
 
-# Beads / Dolt files (added by bd init). Only .dolt/ is root-level; the rest of
-# the beads artifacts are already covered by the tracked .beads/.gitignore.
-.dolt/
+# The beads database (.beads/embeddeddolt/) and its server artifacts are already
+# covered by the tracked .beads/.gitignore. interactions.jsonl is not: bd appends
+# to it on every issue mutation, so tracking it leaves the worktree permanently
+# dirty and can publish local absolute paths from the audit log into this public
+# repo. .beads/issues.jsonl is deliberately left un-ignored so that the passive
+# export can be committed if this repo decides to version it.
+.beads/interactions.jsonl
