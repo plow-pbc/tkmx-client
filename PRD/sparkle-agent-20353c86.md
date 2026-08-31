@@ -1,5 +1,45 @@
 # Progress — sparkle/agent-20353c86-ff69-4bd2-bd78-66300b7da550
 
+## Progress Update as of 2026-08-31, late night Pacific
+*(Most recent updates at top)*
+
+### Summary of changes since last update
+Applied the lesson from the duplicate-PR cleanup before starting anything: checked
+open PRs, remote branches and git history for prior art, then picked an
+unclaimed bead (cko) and shipped it as PR 88 — green, and deliberately shaped to
+collide with nothing.
+
+### Detail of changes made:
+- Pre-flight check, which is the part worth repeating: `gh pr list --search`,
+  `git log --all --grep`, and `git log --all -- <path>` all came back empty for
+  builder-index-client-cko, so it was genuinely unclaimed. That check is what
+  PRs 86/87 lacked.
+- PR 88: new `docs/merge-verification.md`. GitHub populates `merge_commit_sha`
+  on OPEN PRs with its speculative test-merge commit; an agent reading that field
+  reports a merged sha for an unmerged PR. Documents the two reliable signals
+  (`merged`/`mergedAt`, and `git merge-base --is-ancestor <head-sha> origin/main`
+  after a fetch) and prefers the ancestor check, which survives squash and rebase.
+- Placement was the real design decision. AGENTS.md is the obvious home, but four
+  in-flight branches already edit AGENTS.md/CLAUDE.md and that decision is parked
+  in e5s. A fifth variant would have conflicted and buried the guidance behind an
+  unrelated call, so PR 88 adds ONE new file and supplies the one-line link for
+  whichever guidance file eventually lands.
+- All 4 checks green, mergeStateStatus CLEAN. Temp worktree removed.
+
+### Beads activity:
+- Claimed builder-index-client-cko; left it in_progress, not closed — the
+  acceptance is that agents can READ the guidance, which is false until it merges.
+- Added evidence to builder-index-client-9fn: 18 of 25 in_progress beads are
+  babysit duplicates of just four PRs (#69 x6, #70 x4, #72 x4, #74 x5). Agents
+  duplicate the beads about PRs as readily as the PRs themselves.
+
+### Potential concerns to address:
+- Everything I produce now queues behind one human merge gate. Four of my
+  outputs are green-and-waiting or withdrawn; none has landed.
+- The babysit-bead pile suggests a narrower fix than 9fn's current design: a
+  bead whose title names a PR number should attach to an existing open bead for
+  that PR rather than create a sibling.
+
 ## Progress Update as of 2026-08-31, night Pacific
 *(Most recent updates at top)*
 
