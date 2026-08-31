@@ -762,21 +762,42 @@ test("a frozen profile does not consume the one-shot transition markers", async 
     responseJson: { ok: true, profile_frozen: true },
   });
   try {
-    if (fs.existsSync(STATE_PATH)) fs.unlinkSync(STATE_PATH);
+    // Seed the prior edge this test is about: dev stats were ON, and this run
+    // turns them OFF, so clear_dev_stats must fire.
+    fs.writeFileSync(
+      STATE_PATH,
+      JSON.stringify({ dev_stats_on: true, session_stats_on: true }),
+      "utf-8",
+    );
 
-    const result = await runReporter(ctx.baseEnv);
+    const result = await runReporter({ ...ctx.baseEnv, REPORT_DEV_STATS: "false" });
     assert.equal(
       result.status,
       0,
       `reporter exited non-zero.\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
     );
-    assert.ok(ctx.getCaptured(), "the report is still sent to a frozen profile");
+    const captured = ctx.getCaptured();
+    assert.ok(captured, "the report is still sent to a frozen profile");
+    assert.equal(captured.clear_dev_stats, true, "the transition marker fired on this run");
+
+    // The reporter posts no self-assessed health at all. A machine that has
+    // stopped cannot send one, so the server reads its own last accepted POST
+    // instead; a client field reintroduced here would be the false signal that
+    // reasoning replaced.
     assert.equal(
-      fs.existsSync(STATE_PATH),
-      false,
+      captured.reporter_health,
+      undefined,
+      "the reporter must not post a self-assessed health verdict",
+    );
+
+    const persisted = JSON.parse(fs.readFileSync(STATE_PATH, "utf-8"));
+    assert.equal(
+      persisted.dev_stats_on,
+      true,
       "reporting state was recorded against a server that declined to apply it, " +
         "so the next run will treat the transition as already delivered",
     );
+    assert.equal(persisted.session_stats_on, true, "session_stats edge was consumed against a frozen profile");
     // This run is the only one in the suite that reaches the frozen-profile
     // notice, and a cycle that delivers nothing must not also be silent.
     assert.match(

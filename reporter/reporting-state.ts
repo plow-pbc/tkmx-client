@@ -24,7 +24,10 @@ export interface ReportingState {
   session_stats_on: boolean;
 }
 
-export const DEFAULT_STATE: Readonly<ReportingState> = Object.freeze({ dev_stats_on: false, session_stats_on: false });
+export const DEFAULT_STATE: Readonly<ReportingState> = Object.freeze({
+  dev_stats_on: false,
+  session_stats_on: false,
+});
 
 export function loadState(filePath: string): ReportingState {
   try {
