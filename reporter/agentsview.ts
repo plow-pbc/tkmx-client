@@ -4,6 +4,7 @@ import * as path from "node:path";
 import { errMessage } from "./errors";
 import { LAUNCHD_LABEL } from "./install";
 import Database from "better-sqlite3";
+import { openDatabaseWith } from "./sqlite";
 import type { DailyUsage, ModelBreakdown } from "./usage";
 
 interface RawMoney {
@@ -35,7 +36,8 @@ interface RawDailyEntry {
 // Resolve agentsview binary — launchd/systemd don't inherit user shell PATH,
 // so we can't rely on execvp's default search. Resolution order:
 //   1. $AGENTSVIEW_BIN (explicit override for nix, asdf, custom installs)
-//   2. Hard-coded install-location candidates (matches the quickstart)
+//   2. Hard-coded install-location candidates (matches the quickstart),
+//      themselves overridable via $AGENTSVIEW_SYSTEM_CANDIDATES
 //   3. $PATH (covers interactive runs)
 // agentsview ships a native binary: `agentsview.exe` on Windows (its installer
 // drops it in %USERPROFILE%\.agentsview\bin and adds that dir to PATH), bare
@@ -70,6 +72,21 @@ function binaryName(platform: NodeJS.Platform): string {
   return platform === "win32" ? "agentsview.exe" : "agentsview";
 }
 
+// Absolute install locations probed after the $HOME-derived ones. These are
+// the one part of resolution that no environment variable used to reach: a
+// real agentsview at /usr/local/bin was found even by a caller that had
+// redirected HOME and emptied PATH. $AGENTSVIEW_SYSTEM_CANDIDATES (path-
+// delimited) replaces the list, so a custom install can point resolution at
+// its own prefix and a test can set it empty to be sure it sees only what it
+// created. Unset keeps the documented defaults; empty means "none".
+const DEFAULT_SYSTEM_CANDIDATES = ["/opt/homebrew/bin/agentsview", "/usr/local/bin/agentsview"];
+
+function systemCandidates(deps: ResolveDeps): string[] {
+  const raw = deps.env.AGENTSVIEW_SYSTEM_CANDIDATES;
+  if (raw === undefined) return [...DEFAULT_SYSTEM_CANDIDATES];
+  return raw.split(pathFor(deps.platform).delimiter).filter(Boolean);
+}
+
 function agentsviewCandidates(deps: ResolveDeps): string[] {
   const p = pathFor(deps.platform);
   const name = binaryName(deps.platform);
@@ -78,7 +95,7 @@ function agentsviewCandidates(deps: ResolveDeps): string[] {
     candidates.push(p.join(home, ".local", "bin", name));
     candidates.push(p.join(home, ".agentsview", "bin", name));
   }
-  candidates.push("/opt/homebrew/bin/agentsview", "/usr/local/bin/agentsview");
+  candidates.push(...systemCandidates(deps));
   return uniqueDefined(candidates);
 }
 
@@ -169,7 +186,9 @@ export function discoverAgents(env: NodeJS.ProcessEnv = process.env): string[] {
   // failure; discovery aborts the run either way, so a catch buys nothing.)
   let db: Database.Database;
   try {
-    db = new Database(dbPath, { readonly: true });
+    // openDatabaseWith turns a native-addon ABI mismatch into a message that
+    // names the running Node and the pinned one; anything else is unchanged.
+    db = openDatabaseWith((p, o) => new Database(p, o), dbPath, { readonly: true });
   } catch (err) {
     throw new Error(`cannot read the AgentsView index at ${dbPath}: ${errMessage(err)}`);
   }
