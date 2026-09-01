@@ -8,6 +8,7 @@
     "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json --noEmit",
     "report": "node dist/reporter/report.js",
     "untag": "node dist/reporter/untag.js",
+    "duplicate-prs": "node dist/reporter/duplicate-prs.js",
     "install-service": "node dist/reporter/install.js",
     "uninstall-service": "node dist/reporter/uninstall.js",
     "test": "npm run build && npm run build:tests && node --test dist/test/*.test.js",
