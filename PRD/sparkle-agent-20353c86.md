@@ -1,4 +1,53 @@
 # Progress — sparkle/agent-20353c86-ff69-4bd2-bd78-66300b7da550
+## Progress Update as of 2026-08-31, PR 88 correction Pacific
+*(Most recent updates at top)*
+
+### Summary of changes since last update
+Roborev caught that PR 88 — green and queued for a human merge — shipped
+INVERTED guidance. Verified the claim by measurement, rewrote the doc, and
+pushed the fix to PR 88 before a human could merge the wrong version.
+
+### Detail of changes made:
+- The bug in my own PR: the first draft said `git merge-base --is-ancestor`
+  "survives squash and rebase" and told agents to BELIEVE THE ANCESTOR CHECK
+  when it disagrees with `merged`. Both halves are false. Squash and rebase
+  rewrite the commit, so the PR head sha never becomes an ancestor of main.
+  The doc existed to stop agents reporting a wrong merge state, and it replaced
+  one wrong answer (false merged) with the opposite one (false NOT merged) —
+  and named the wrong one as the tie-breaker.
+- Verified rather than taking the review's word, and the first attempt was
+  itself wrong: `gh pr view --json merged` fails on this gh version with
+  `Unknown JSON field: "merged"`, which silently produced empty shas and
+  meaningless NOT-ANCESTOR results. Redone via `gh api .../pulls/<N> -q .merged`:
+    #76 merged=true head=33e7bd6 ancestor=no
+    #77 merged=true head=5514627 ancestor=no
+    #78 merged=true head=eba0002 ancestor=no
+  Repo allows squash=true rebase=true merge=true. All three genuinely merged;
+  the ancestor check calls all three unmerged.
+- That gh failure mode is now IN the doc: it fails in a way that reads like
+  "not merged".
+- New rule: `merged` is primary; ancestry corroborates and is conclusive only
+  when it PASSES (ancestor => merged; not-ancestor => inconclusive). Added the
+  merge-commit sha as the correct corroboration for a squash merge.
+- Pushed as 8c9a80d to docs/merge-verification. PR 88 re-ran: 4/4 green, CLEAN,
+  MERGEABLE. PR body updated with the correction and the retro marker.
+- Corrected my own miscount on builder-index-client-9fn: I wrote "#74 x4" over
+  five ids, and a breakdown summing to 19 against a claimed total of 18. Real
+  split is #69 x5 (nx8 is OPEN, not in_progress), #70 x4, #72 x4, #74 x5 = 18.
+  The headline claim survives; the split did not.
+
+### Beads activity:
+- Commented the correction on builder-index-client-9fn.
+- Closed roborev job 72503 (the finding that caught this).
+
+### Potential concerns to address:
+- The near-miss is the lesson: a GREEN, CLEAN, MERGEABLE PR sat waiting on a
+  human with guidance that was exactly backwards. CI cannot catch a wrong claim
+  in a doc. The only thing that caught it was a review of the commit that
+  RECORDED the work, not of the work itself.
+- I also nearly mis-verified the fix, because a wrong `gh` field name fails in a
+  direction that looks like a real answer. Measure with the REST API.
+
 ## Progress Update as of 2026-08-31, status check Pacific
 *(Most recent updates at top)*
 
