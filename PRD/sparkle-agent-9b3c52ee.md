@@ -1,5 +1,47 @@
 # sparkle/agent-9b3c52ee-b077-45c6-8b0a-aa716928aa8f
 
+## Progress Update as of 2026-09-01 13:05 Pacific
+*(Most recent updates at top)*
+
+### Summary of changes since last update
+Acted on roborev #73871's finding that the previous commit's ignore guarantee was
+asserted only by a throwaway scratch run: extended `test/gitignore.test.ts` to lock
+the `.claude` pair the same way it already locks the `.env*` pair.
+
+### Detail of changes made:
+- `test/gitignore.test.ts`: added `.claude/settings.local.json` (must be ignored) and
+  `.claude/settings.json` (must stay trackable) to the file's guarantee lists.
+- The naive form of that assertion is VACUOUS on a developer machine, which is the
+  interesting part. This clone's `.git/info/exclude` blanket-excludes `.claude/`, and
+  an excluded DIRECTORY short-circuits: git never descends into it, so no rule in the
+  tracked `.gitignore` is consulted for files underneath. `git check-ignore` in this
+  worktree therefore answers "ignored" even with the protecting rule deleted — it
+  masks the exact regression the test exists to catch, on the one machine where a
+  human would otherwise see it.
+- So `ignoredByRepoRules()` replays the repo's TRACKED ignore files into a throwaway
+  `git init` repo that has no `info/exclude` and no user config (`core.excludesFile=/dev/null`),
+  and asks there. That is the fresh-clone question, which is the one that matters for
+  a public repo. Note `check-ignore -v` exits 0 on ANY match including a negation, so
+  the verdict is read from the pattern (leading `!` = re-admitted), not the exit code.
+- Verified NOT vacuous: with the `.gitignore` line removed the new test FAILS
+  (`pass 2 / fail 1`); with it restored, `pass 3 / fail 0`. `.gitignore` was restored
+  byte-identical afterwards (`git diff --stat` showed only the test file changed).
+
+### Test baseline (measured, not assumed):
+- `origin/main`: 276 tests, 271 pass, **5 fail**.
+- This branch: 277 tests, 272 pass, **5 fail** — same 5 pre-existing failures
+  (`agentsview.test.js`, `session-stats.test.js`; they depend on a real `~/.agentsview`
+  on the host), plus exactly one new passing test. No regression from this branch.
+
+### Beads activity:
+- None. Scaffolding branch; no issues opened or closed.
+
+### Potential concerns to address:
+- The 5 pre-existing failures are host-environment-dependent and fail on `main` too.
+  They pass in CI's fresh checkout, so they are a local-only annoyance, not a gate.
+- PR #92 still cannot be merged by an agent (repo is pinned merge-protected).
+
+
 ## Progress Update as of 2026-09-01 (Pacific)
 *(Most recent updates at top)*
 
