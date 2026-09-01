@@ -13,7 +13,7 @@ const REPO_ROOT = path.join(__dirname, "..", "..");
 // `git add -A` away from publishing a credential — while over-broad ignoring
 // would quietly drop the template from the repo.
 //
-// The two lists below assert those halves. They test real `git check-ignore`
+// The lists below assert those halves. They test real `git check-ignore`
 // behaviour rather than matching literal .gitignore lines, so reformatting the
 // file cannot silently drop either guarantee.
 const MUST_BE_IGNORED = [
@@ -28,7 +28,7 @@ const MUST_BE_IGNORED = [
   ".env.save",
 ];
 
-// The same two halves, for the other secret-shaped file this repo tracks.
+// The same two halves, for the other secret-shaped pair this repo tracks.
 // `.claude/settings.json` is committed, so its sibling local override is one
 // `git add -A` from following it in: settings.local.json holds absolute
 // per-machine paths and a permission allowlist. Nothing but a per-clone
@@ -39,52 +39,45 @@ const MUST_BE_IGNORED_BY_REPO_RULES = [".claude/settings.local.json"];
 // settings.json is the half of the .claude pair the repo means to track.
 const MUST_NOT_BE_IGNORED = [".env.example", ".claude/settings.json"];
 
+// "Would this file escape into a commit?" — asked of this working tree, index
+// and all. A *tracked* path reports as not-ignored whatever the rules say, so a
+// backup that somehow got staged trips the alarm rather than hiding behind its
+// own ignore rule. That index-awareness is the point for the secret files.
+//
 // `git check-ignore` exits 0 when the path is ignored, 1 when it is not.
-//
-// The two call sites want DIFFERENT questions answered, which is why the
-// --no-index flag is a per-case decision rather than a constant:
-//
-//   index-aware (default) — "would this file escape into a commit?" A *tracked*
-//     path is reported as not-ignored regardless of the rules, so a backup that
-//     somehow got staged trips the alarm. This is what the secret files need.
-//
-//   rules-only (--no-index) — "do the ignore rules exclude this?" Needed for a
-//     file that is already tracked, where the index-aware answer is a foregone
-//     "not ignored" and would make the assertion vacuous.
-function checkIgnore(relativePath: string, opts: { rulesOnly: boolean }): boolean {
-  const args = ["check-ignore", "--quiet"];
-  if (opts.rulesOnly) args.push("--no-index");
-  args.push(relativePath);
-
+function checkIgnore(relativePath: string): boolean {
   try {
-    execFileSync("git", args, { cwd: REPO_ROOT, stdio: "ignore" });
+    execFileSync("git", ["check-ignore", "--quiet", relativePath], {
+      cwd: REPO_ROOT,
+      stdio: "ignore",
+    });
     return true;
   } catch (err) {
     // Exit 1 is the real answer "not ignored". Anything else is git failing
     // (128 when there's no work tree, for instance), and swallowing that would
-    // make the NEGATIVE assertion below pass vacuously — it cannot otherwise
+    // make the NEGATIVE assertions below pass vacuously — they cannot otherwise
     // tell "the rules re-admit this file" from "git never ran".
     if ((err as { status?: number }).status !== 1) throw err;
     return false;
   }
 }
 
-// A third question the two modes above can't answer: "what would a FRESH CLONE
-// do with this path?" — i.e. do the ignore rules this repo actually ships
-// decide its fate, with no help from local state?
+// A different question: "what would a FRESH CLONE do with this path?" — do the
+// ignore rules this repo actually ships decide its fate, with no help from
+// local state?
 //
-// The local answer is untrustworthy here, and silently so. This clone's
-// `.git/info/exclude` blanket-excludes `.claude/`, and an excluded DIRECTORY
-// short-circuits: git never descends into it, so no rule in the tracked
-// `.gitignore` is ever consulted for a file underneath. Asking git in this
-// working tree would report `.claude/settings.local.json` ignored even if the
-// rule protecting it were deleted — masking, on the one machine where it would
-// otherwise show up, exactly the regression this file exists to catch.
+// Asking git in this working tree can't answer that, and fails silently when it
+// can't. This clone's `.git/info/exclude` blanket-excludes `.claude/`, and an
+// excluded DIRECTORY short-circuits: git never descends into it, so no rule in
+// the tracked `.gitignore` is ever consulted for a file underneath. The local
+// answer would be "ignored" even with the protecting rule deleted — masking, on
+// the one machine where a human would otherwise notice, exactly the regression
+// these assertions exist to catch.
 //
 // So replay the tracked ignore files into a throwaway repo that has no
-// `info/exclude` and no user config, and ask there. Rules-only (`--no-index`),
-// because nothing is tracked in that repo. `-v` exits 0 on ANY match including
-// a negation, so the verdict is in the pattern: a leading "!" re-admits.
+// `info/exclude` and no user config, and ask there. Rules-only (`--no-index`)
+// because nothing is tracked in that repo; the exit status handles negations on
+// its own, since a negated match is reported as not-ignored.
 function ignoredByRepoRules(relativePath: string): boolean {
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "gitignore-rules-"));
   try {
@@ -102,23 +95,17 @@ function ignoredByRepoRules(relativePath: string): boolean {
       fs.copyFileSync(path.join(REPO_ROOT, ignoreFile), dest);
     }
 
-    let output: string;
     try {
-      output = execFileSync(
+      execFileSync(
         "git",
-        ["-c", "core.excludesFile=/dev/null", "check-ignore", "--no-index", "-v", relativePath],
-        { cwd: scratch, encoding: "utf8" },
+        ["-c", "core.excludesFile=/dev/null", "check-ignore", "--no-index", "--quiet", relativePath],
+        { cwd: scratch, stdio: "ignore" },
       );
+      return true;
     } catch (err) {
-      // Exit 1 is "no rule matched", i.e. not ignored. Anything else is git
-      // failing, and swallowing that would make these assertions vacuous.
       if ((err as { status?: number }).status !== 1) throw err;
       return false;
     }
-
-    // "<source>:<line>:<pattern>\t<path>"
-    const pattern = output.split("\t")[0]!.split(":")[2]!;
-    return !pattern.startsWith("!");
   } finally {
     fs.rmSync(scratch, { recursive: true, force: true });
   }
@@ -127,7 +114,7 @@ function ignoredByRepoRules(relativePath: string): boolean {
 test("backups of .env are git-ignored so a credential can't be committed", () => {
   for (const candidate of MUST_BE_IGNORED) {
     assert.ok(
-      checkIgnore(candidate, { rulesOnly: false }),
+      checkIgnore(candidate),
       `${candidate} must be git-ignored — it contains a live API_KEY and this repo is public`,
     );
   }
