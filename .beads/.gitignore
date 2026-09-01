@@ -73,5 +73,10 @@ db.sqlite
 bd.db
 # NOTE: Do NOT add negation patterns here.
 # They would override fork protection in .git/info/exclude.
-# Config files (metadata.json, config.yaml) are tracked by git by default
-# since no pattern above ignores them.
+# metadata.json stays TRACKED: project_id / dolt_database are shared identity.
+# config.yaml is ignored below because it can hold credentials.
+
+# Local integration config. `bd config set github.token` / `linear.api_key` write
+# secrets here and this repository is public, so it must never be tracked.
+# Keep credentials in GITHUB_TOKEN / LINEAR_API_KEY instead.
+config.yaml
