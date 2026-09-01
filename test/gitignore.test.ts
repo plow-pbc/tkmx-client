@@ -88,13 +88,15 @@ test(".env.example stays committable despite the broad .env* rule", () => {
 // does, in two places) would pass a plain `check-ignore` on a checkout where the
 // committed fix was never made — a green suite that strands the next agent.
 //
-// `check-ignore -v` prints `<source>:<line>:<pattern>\t<path>`. Git reports the
-// in-tree top-level file as the literal relative path `.gitignore`, while every
-// other source is an absolute path — so the assertion is a `.gitignore:` PREFIX,
-// not a suffix or a loose match. A suffix would accept `core.excludesFile` set
-// to `~/.gitignore`, which is a per-machine override and exactly what this
-// rejects. A path that is not ignored at all exits 1, which throws here — also a
-// failure, which is correct.
+// `check-ignore -v` prints `<source>:<line>:<pattern>\t<path>`. Git reports that
+// source relative to cwd when it lives inside the worktree (`.gitignore`,
+// `.git/info/exclude`) and absolute for `core.excludesFile` — so what separates
+// the committed top-level file from either override is where the match is
+// ANCHORED, hence a `.gitignore:` prefix rather than a suffix or a loose match.
+// A suffix would accept `core.excludesFile` set to `~/.gitignore`: git prints
+// that as `/Users/<someone>/.gitignore:1:`, a per-machine override and exactly
+// what this rejects. A path that is not ignored at all exits 1, which throws
+// here — also a failure, which is correct.
 test("Sparkle's per-worktree marker is ignored by the committed .gitignore", () => {
   const output = execFileSync(
     "git", ["check-ignore", "-v", "--no-index", ".sparkle/merge-policy.json"],

@@ -1,3 +1,35 @@
+## Progress Update as of 2026-09-01 09:05 PDT
+*(Most recent updates at top)*
+
+### Summary of changes since last update
+Corrected the new test comment's account of how `git check-ignore -v` reports its source
+(roborev 73868). Comment only — no behaviour change.
+
+### Detail of changes made:
+- The comment claimed git reports "every other source" as an absolute path. False for the most
+  likely override, and the one the docstring itself names: a rule in `.git/info/exclude` prints
+  the RELATIVE `.git/info/exclude:1:`. My own scratch-clone probe had already printed exactly
+  that (`.git/info/exclude:7:.sparkle/`) and I wrote the comment past it.
+- What actually holds: git reports the source relative to cwd when it lives inside the worktree
+  (`.gitignore`, `.git/info/exclude`) and absolute only for `core.excludesFile`. So the thing
+  separating the committed file from either override is where the match is ANCHORED — which is
+  why the prefix shape is right. The assertion was already correct; only its stated reason was
+  not.
+- Worth noting this is the SECOND instance on this branch of the same defect class, and the
+  first one's fix is what surfaced it: a rationale comment asserting an observation the
+  behaviour contradicts. The fix carries more weight than the wording, because the reason is
+  what the next agent edits against.
+- Verified: `npm run typecheck` clean; `node --test dist/test/gitignore.test.js` 3/3.
+
+### Beads activity:
+- No bead state change; branch work refs builder-index-client-wfe.
+- `bd remember` key `verify-negative-cases-in-a-scratch-clone-not-the-working-tree` records the
+  probe-commit lesson and the assert-the-source rule for future agents on this repo.
+
+### Potential concerns to address:
+- PR #84 is CLEAN / APPROVED with all checks green but cannot be merged by an agent:
+  `plow-pbc/tkmx-client` is pinned merge-protected, so landing waits on a human.
+
 ## Progress Update as of 2026-08-31 18:45 PDT
 *(Most recent updates at top)*
 
