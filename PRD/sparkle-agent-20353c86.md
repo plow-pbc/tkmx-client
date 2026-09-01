@@ -1,4 +1,56 @@
 # Progress — sparkle/agent-20353c86-ff69-4bd2-bd78-66300b7da550
+## Progress Update as of 2026-08-31, status check Pacific
+*(Most recent updates at top)*
+
+### Summary of changes since last update
+Drained the roborev backlog that was silently blocking `git push` on this branch,
+fixed the one finding that outlives the branch, and filed the one real bug the
+review surfaced. Confirmed the merge gate is a hard policy block, not a
+transient failure.
+
+### Detail of changes made:
+- The push gate was the discovery: `git push` was REFUSED by the roborev
+  pre-push hook with unresolved FAIL reviews on bf4a021, c48f97f and 680a494.
+  The branch had 7 commits that existed ONLY in this worktree.
+- Confirmed the merge block is policy: `gh pr merge 88 --merge` is intercepted by
+  worktree-guard, which cites `apps/desktop/shared/merge-protected-repos.json`.
+  It says DO NOT RETRY in any spelling. PR 88 is green (4/4 checks, CLEAN,
+  MERGEABLE) and waits on a human. Merging is not mine to do here.
+- FIXED the one durable finding: the stored memory
+  `sparkle-agent-worktrees-in-plow-pbc-tkmx-client` named CLOSED PR 87 as the
+  in-flight fix and told the next agent to reach for the .git/info/exclude
+  workaround. It now names PRs 83 and 84 (both verified OPEN, both adding
+  `.sparkle/`, only one should land), 87 as closed-as-duplicate, and records the
+  merge-protection. That memory loads into every future session in this repo, so
+  it was pointing every future agent at a dead PR.
+- FILED builder-index-client-6w9 (P1 bug) for the genuinely new problem roborev
+  found and I re-verified by hand: `.beads/hooks/pre-push` ends the roborev gate
+  with an unconditional `exit 0` at line 40, so the BEADS INTEGRATION block at
+  lines 42+ is unreachable — `bd hooks run pre-push` has never run. Same file:
+  `core.hooksPath` is an ABSOLUTE path into a different checkout, and
+  `.beads/hooks/*` are tracked executables in a public repo.
+
+### Beads activity:
+- Opened builder-index-client-6w9 (P1): beads pre-push block is dead code.
+- Rewrote memory sparkle-agent-worktrees-in-plow-pbc-tkmx-client.
+- Closed roborev jobs 71778, 72325, 72498. `roborev close` has NO --reason flag,
+  so the rationale lives here instead:
+  * 71778 (bf4a021): findings real but not fixable on this branch; High+Medium
+    filed as 6w9; the `.sparkle/` Medium is already fixed by 42598c4; commit
+    duplicates beads-scaffolding PRs 69/80/81.
+  * 72325 (c48f97f): superseded by PR 70, which covers the same three files
+    INCLUDING the session-stats case this review flags as unmigrated.
+  * 72498 (680a494): actionable item fixed (the memory above).
+
+### Potential concerns to address:
+- THIS BRANCH IS RECORD-ONLY. Verified by diff, not assumed: 42598c4 duplicates
+  open PRs 83 AND 84 (both add `.sparkle/` to .gitignore); c48f97f duplicates
+  open PR 70 (same reporter/agentsview.ts + test/agentsview.test.ts). Opening a
+  PR from it would be the fifth duplicate of work already queued. It is pushed
+  for preservation only — do NOT open a PR from it.
+- Five of my outputs are now green-and-waiting or withdrawn and none has landed.
+  Every one is behind the same single human merge gate.
+
 
 ## Progress Update as of 2026-08-31, overnight Pacific
 *(Most recent updates at top)*
