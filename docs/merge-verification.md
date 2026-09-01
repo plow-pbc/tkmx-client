@@ -4,6 +4,9 @@ An agent asked to merge a PR and report the result can produce a confident,
 checkable-looking, completely wrong answer. This page says which signal to
 trust.
 
+There are two ways to get this wrong, and they point in opposite directions.
+One reports a merge that never happened; the other denies a merge that did.
+
 ## Never trust `merge_commit_sha`
 
 On an **open** PR, the GitHub API still returns a populated `merge_commit_sha`.
@@ -25,27 +28,74 @@ Observed on PR #72:
 An agent reading only the first field reports a merge sha for a PR that is
 still open.
 
-## Trust one of these instead
+## The primary signal: the PR's own merged flag
 
-**The PR's own merged flag.** `merged_at` is null until the merge happens:
+`merged` / `merged_at` is the authoritative answer. `merged_at` is null until
+the merge happens:
 
 ```bash
-gh pr view <N> --json merged,mergedAt,state
+gh api repos/<owner>/<repo>/pulls/<N> -q '"\(.merged) \(.merged_at)"'
 ```
 
-**Ancestry on the real branch.** This answers the question that actually
-matters — is the work on `main`? — and it stays correct no matter how the PR
-was closed, squashed, or rebased:
+Prefer the REST call above. `gh pr view --json merged` is **not** available in
+every `gh` version — where it is missing it fails with `Unknown JSON field:
+"merged"`, which is easy to misread as "not merged". `mergedAt` is accepted by
+`gh pr view` more widely:
+
+```bash
+gh pr view <N> --json number,state,mergedAt
+```
+
+## Ancestry: corroborating only, and only when it passes
+
+It is tempting to treat "is the work on `main`?" as the real question and check
+it directly:
 
 ```bash
 git fetch origin
-git merge-base --is-ancestor <head-sha> origin/main && echo merged || echo "not merged"
+git merge-base --is-ancestor <head-sha> origin/main
 ```
 
-Both checks were run against PR #72 above, and both correctly said not merged.
+**This check does not survive squash or rebase merges.** Both strategies
+rewrite the commit, so the PR's original head sha never becomes an ancestor of
+`main` even though the work is fully merged. Any repo with
+`allow_squash_merge` or `allow_rebase_merge` enabled will produce false
+negatives — and most repos enable them.
+
+Measured in this repository, whose settings allow all three strategies
+(`squash=true rebase=true merge=true`), against the three most recently merged
+PRs:
+
+| PR  | `merged` | head sha  | ancestor of `origin/main`? |
+|-----|----------|-----------|----------------------------|
+| #76 | `true`   | `33e7bd6` | **no**                     |
+| #77 | `true`   | `5514627` | **no**                     |
+| #78 | `true`   | `eba0002` | **no**                     |
+
+All three are genuinely merged. The ancestor check calls all three unmerged.
+
+So the check is only conclusive in one direction:
+
+- ancestor ⇒ **merged** (the work is demonstrably on `main`)
+- not an ancestor ⇒ **inconclusive** (says nothing, under squash or rebase)
+
+To corroborate a squash or rebase merge, look at the merge commit GitHub
+recorded rather than the head sha:
+
+```bash
+gh api repos/<owner>/<repo>/pulls/<N> -q .merge_commit_sha   # valid ONLY when merged is true
+git merge-base --is-ancestor <that-sha> origin/main
+```
+
+Note the same field from the top of this page: it is trustworthy *after* the
+merge and meaningless before it. Check `merged` first, then read it.
 
 ## Reporting rule
 
-Report a PR as merged only when `merged` is true or the ancestor check passes.
-If the two disagree, believe the ancestor check and say what you saw — a
-disagreement is worth surfacing, not smoothing over.
+**Report a PR as merged when, and only when, `merged` is true.**
+
+Ancestry is a corroborating check, not a tie-breaker. If the two disagree —
+`merged: true` but the head sha is not an ancestor — the ordinary explanation
+is a squash or rebase merge, and the PR is merged. Do not report it as
+unmerged. Say what you saw if something still looks off, but do not let a
+not-ancestor result override an explicit `merged: true`.
