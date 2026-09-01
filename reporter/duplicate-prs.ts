@@ -15,10 +15,15 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
+// `gh pr list --json files` returns every path of every open pull request, and
+// Node's default 1 MiB stdout buffer aborts the run with a message that reads
+// like a `gh` failure. Same value and same reason as session-stats.ts, which
+// was written after agentsview.ts hit exactly this.
+const MAX_BUFFER_BYTES = 8 * 1024 * 1024;
+
 export type PullRequest = {
   number: number;
   title: string;
-  headRefName: string;
   createdAt: string;
   files: { path: string }[];
 };
@@ -107,14 +112,20 @@ function byAge(a: PullRequest, b: PullRequest): number {
 // lower, the rule eats the signal on a small board: with five pull requests
 // open, three of them doing the same job is the duplication being hunted, and
 // a quarter-of-the-board rule would write those three files off as hubs and
-// report nothing. The floor of 2 covers the same failure at the smallest
-// scale, where the one file two branches genuinely share is present in 100% of
-// them. The cost of the high bar is that a moderately common file (a README in
-// a third of the branches) still scores; that yields a loose cluster, which is
-// a far cheaper error than silence.
-export const HUB_FILE_FRACTION = 0.5;
+// report nothing. The cost of the high bar is that a moderately common file (a
+// README in a third of the branches) still scores; that yields a loose
+// cluster, which is a far cheaper error than silence.
+const HUB_FILE_FRACTION = 0.5;
 
-export function findHubFiles(prs: PullRequest[]): Set<string> {
+// Below this many open pull requests, NOTHING is common enough to be a hub.
+// The fraction alone goes blind exactly where duplication is worst: three
+// identical pull requests put every one of their files in 100% of the board,
+// so a fraction-only rule discards all of them and reports no duplication at
+// all — from a tool built because nine of twenty-one were one job. A floor of
+// 5 also covers four duplicates among six, which a floor of 3 still swallows.
+const HUB_FILE_FLOOR = 5;
+
+function findHubFiles(prs: PullRequest[]): Set<string> {
   const counts = new Map<string, number>();
   for (const pr of prs) {
     for (const path of pathsOf(pr)) {
@@ -122,7 +133,7 @@ export function findHubFiles(prs: PullRequest[]): Set<string> {
     }
   }
 
-  const limit = Math.max(2, Math.ceil(HUB_FILE_FRACTION * prs.length));
+  const limit = Math.max(HUB_FILE_FLOOR, Math.ceil(HUB_FILE_FRACTION * prs.length));
   const hubs = new Set<string>();
   for (const [path, count] of counts) {
     if (count > limit) hubs.add(path);
@@ -223,28 +234,74 @@ export function formatClusters(clusters: Cluster[], totalOpen: number): string {
 }
 
 async function fetchOpenPullRequests(limit: number): Promise<PullRequest[]> {
-  const { stdout } = await execFileAsync("gh", [
-    "pr",
-    "list",
-    "--state",
-    "open",
-    "--json",
-    "number,title,headRefName,createdAt,files",
-    "--limit",
-    String(limit),
-  ]);
+  const { stdout } = await execFileAsync(
+    "gh",
+    [
+      "pr",
+      "list",
+      "--state",
+      "open",
+      "--json",
+      "number,title,createdAt,files",
+      "--limit",
+      String(limit),
+    ],
+    { maxBuffer: MAX_BUFFER_BYTES },
+  );
   return JSON.parse(stdout) as PullRequest[];
 }
 
-async function main(): Promise<void> {
-  const limitArg = process.argv.indexOf("--limit");
-  const limit = limitArg === -1 ? 100 : Number(process.argv[limitArg + 1]);
-  const thresholdArg = process.argv.indexOf("--threshold");
-  const threshold =
-    thresholdArg === -1
-      ? DEFAULT_OVERLAP_THRESHOLD
-      : Number(process.argv[thresholdArg + 1]);
+export type CliOptions = { limit: number; threshold: number };
 
+// Every flag is validated at parse time because the failure is SILENT
+// otherwise: a typo'd `--threshold` yields NaN, every `overlap >= NaN`
+// comparison is false, nothing unions, and the tool prints a confident "No
+// duplicate work found" for a run that never scored anything. A clean bill of
+// health nobody earned is the worst output this tool can produce.
+export function parseCliOptions(argv: string[]): CliOptions {
+  // A flag with nothing after it — `--threshold` as the last argument, or
+  // followed by the next flag — is a typo, not a request for the default.
+  // Returning `undefined` for it would quietly hand back the default value and
+  // hide the mistake, which is the same silent-skip this validation exists to
+  // prevent.
+  const read = (flag: string): string | undefined => {
+    const at = argv.indexOf(flag);
+    if (at === -1) return undefined;
+    const value = argv[at + 1];
+    if (value === undefined || value.startsWith("--")) {
+      throw new Error(`${flag} needs a value`);
+    }
+    return value;
+  };
+
+  const rawLimit = read("--limit");
+  let limit = 100;
+  if (rawLimit !== undefined) {
+    limit = Number(rawLimit);
+    if (!Number.isInteger(limit) || limit < 1) {
+      throw new Error(`--limit needs a positive whole number, got ${rawLimit}`);
+    }
+  }
+
+  const rawThreshold = read("--threshold");
+  let threshold = DEFAULT_OVERLAP_THRESHOLD;
+  if (rawThreshold !== undefined) {
+    threshold = Number(rawThreshold);
+    // Zero is rejected alongside NaN: it unions every pair on the board,
+    // including pull requests that share nothing, and reports the whole thing
+    // as one cluster.
+    if (!(threshold > 0 && threshold <= 1)) {
+      throw new Error(
+        `--threshold needs a number greater than 0 and at most 1, got ${rawThreshold}`,
+      );
+    }
+  }
+
+  return { limit, threshold };
+}
+
+async function main(): Promise<void> {
+  const { limit, threshold } = parseCliOptions(process.argv.slice(2));
   const prs = await fetchOpenPullRequests(limit);
   console.log(formatClusters(clusterByFileOverlap(prs, threshold), prs.length));
 }
