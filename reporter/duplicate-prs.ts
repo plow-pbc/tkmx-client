@@ -251,30 +251,65 @@ async function fetchOpenPullRequests(limit: number): Promise<PullRequest[]> {
   return JSON.parse(stdout) as PullRequest[];
 }
 
-export type CliOptions = { limit: number; threshold: number };
+type CliOptions = { limit: number; threshold: number };
 
-// Every flag is validated at parse time because the failure is SILENT
-// otherwise: a typo'd `--threshold` yields NaN, every `overlap >= NaN`
-// comparison is false, nothing unions, and the tool prints a confident "No
-// duplicate work found" for a run that never scored anything. A clean bill of
-// health nobody earned is the worst output this tool can produce.
-export function parseCliOptions(argv: string[]): CliOptions {
-  // A flag with nothing after it — `--threshold` as the last argument, or
-  // followed by the next flag — is a typo, not a request for the default.
-  // Returning `undefined` for it would quietly hand back the default value and
-  // hide the mistake, which is the same silent-skip this validation exists to
-  // prevent.
-  const read = (flag: string): string | undefined => {
-    const at = argv.indexOf(flag);
-    if (at === -1) return undefined;
-    const value = argv[at + 1];
-    if (value === undefined || value.startsWith("--")) {
-      throw new Error(`${flag} needs a value`);
+const KNOWN_FLAGS = ["--limit", "--threshold"] as const;
+
+// Reads `--flag value` and `--flag=value` into a map, and refuses anything it
+// does not recognise.
+//
+// EVERY unrecognised shape is an error rather than a shrug, because the
+// consequence of shrugging is uniform and bad: the flag is ignored, the
+// default applies, and the operator reads a result they believe honoured their
+// request. A misspelled `--treshold`, a trailing `--threshold` with nothing
+// after it, and a stray positional all fail that same way. The `=` form
+// matters most of all — it is the more common way to type it, and it does not
+// appear in the argument list under its own name at all.
+function readFlags(argv: string[]): Map<string, string> {
+  const flags = new Map<string, string>();
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const token = argv[index];
+    if (!token.startsWith("--")) {
+      throw new Error(`unexpected argument ${token}; expected --limit or --threshold`);
     }
-    return value;
-  };
 
-  const rawLimit = read("--limit");
+    const equals = token.indexOf("=");
+    const name = equals === -1 ? token : token.slice(0, equals);
+    if (!(KNOWN_FLAGS as readonly string[]).includes(name)) {
+      throw new Error(`unknown flag ${name}; expected --limit or --threshold`);
+    }
+
+    if (equals !== -1) {
+      // `--threshold=` with nothing after the sign is a typo, and the empty
+      // string would coerce to 0 rather than failing.
+      const value = token.slice(equals + 1);
+      if (value === "") throw new Error(`${name} needs a value`);
+      flags.set(name, value);
+      continue;
+    }
+
+    const value = argv[index + 1];
+    if (value === undefined || value.startsWith("--")) {
+      throw new Error(`${name} needs a value`);
+    }
+    flags.set(name, value);
+    index += 1;
+  }
+
+  return flags;
+}
+
+// Values are validated as well as read, because an unvalidated `--threshold`
+// fails silently in the worst possible direction: `Number("zero")` is NaN,
+// every `overlap >= NaN` comparison is false, nothing unions, and the tool
+// prints a confident "No duplicate work found" for a run that never scored
+// anything. A clean bill of health nobody earned is the worst output this tool
+// can produce.
+export function parseCliOptions(argv: string[]): CliOptions {
+  const flags = readFlags(argv);
+
+  const rawLimit = flags.get("--limit");
   let limit = 100;
   if (rawLimit !== undefined) {
     limit = Number(rawLimit);
@@ -283,7 +318,7 @@ export function parseCliOptions(argv: string[]): CliOptions {
     }
   }
 
-  const rawThreshold = read("--threshold");
+  const rawThreshold = flags.get("--threshold");
   let threshold = DEFAULT_OVERLAP_THRESHOLD;
   if (rawThreshold !== undefined) {
     threshold = Number(rawThreshold);

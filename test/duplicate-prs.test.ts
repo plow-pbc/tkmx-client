@@ -260,3 +260,30 @@ test("a non-numeric limit is rejected", () => {
   assert.throws(() => parseCliOptions(["--limit", "lots"]), /limit/);
   assert.throws(() => parseCliOptions(["--limit", "0"]), /limit/);
 });
+
+// `--threshold=0.8` is the more common way to type it, and it used to miss
+// `indexOf` entirely: the flag was ignored, the default was used, and the
+// operator read a result they believed was computed at 0.8. That is the exact
+// silent default this parser exists to prevent.
+test("the equals form of a flag is honoured", () => {
+  const options = parseCliOptions(["--limit=40", "--threshold=0.8"]);
+  assert.equal(options.limit, 40);
+  assert.equal(options.threshold, 0.8);
+});
+
+test("the equals form is validated like the spaced form", () => {
+  assert.throws(() => parseCliOptions(["--threshold=zero"]), /threshold/);
+  assert.throws(() => parseCliOptions(["--threshold="]), /threshold/);
+});
+
+// A misspelled flag is the same failure wearing a different hat: it parses as
+// nothing, the default applies, and the run looks like it honoured the
+// request.
+test("an unknown flag is rejected rather than ignored", () => {
+  assert.throws(() => parseCliOptions(["--treshold", "0.8"]), /--treshold/);
+  assert.throws(() => parseCliOptions(["--verbose"]), /--verbose/);
+});
+
+test("a bare positional argument is rejected", () => {
+  assert.throws(() => parseCliOptions(["40"]), /40/);
+});
