@@ -304,3 +304,43 @@ test("severity maps onto bd priority inverted", () => {
     assert.match(calls, new RegExp(`--priority=${pri}\\b`), `severity ${sev} -> P${pri}`);
   }
 });
+
+// A failed lookup must never fall through into a create. If the store cannot be
+// read, the script does not know whether this finding already has a bead — and
+// guessing "no" mints the duplicate the whole script exists to prevent. Noise on
+// stdout is the realistic shape of this: a bd that dies mid-write, or prints a
+// usage banner, still fails while leaving bytes behind.
+test("an unreadable store parks rather than guessing there is no bead", () => {
+  const dir = tmp();
+  const log = path.join(dir, "calls.log");
+  const bd = path.join(dir, "bd");
+  fs.writeFileSync(
+    bd,
+    `#!/usr/bin/env bash
+printf '%s\\n' "$*" >> ${JSON.stringify(log)}
+if [[ "$1" == "list" ]]; then
+  # fails, but not silently — the failure path must not depend on empty stdout
+  printf 'Error: could not open the issue store\\n'
+  exit 1
+fi
+printf '%s' '{"id":"must-not-be-created"}'
+`,
+    { mode: 0o755 },
+  );
+  const drops = path.join(dir, "drops.jsonl");
+  const { line, status } = runFiler(GOOD, {
+    BD_BIN: bd,
+    PATH: `${dir}:${process.env.PATH}`,
+    RETRO_DROP_LOG: drops,
+  });
+
+  assert.equal(status, 0);
+  assert.equal(line, "unfiled:store-unreadable");
+
+  const calls = fs.readFileSync(log, "utf8");
+  assert.equal(calls.match(/^create /gm), null, "a failed lookup must not fall through to create");
+
+  const parked = JSON.parse(fs.readFileSync(drops, "utf8").trim());
+  assert.equal(parked.reason, "store-unreadable");
+  assert.equal(parked.summary, GOOD[1]);
+});

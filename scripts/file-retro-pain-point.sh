@@ -161,24 +161,39 @@ command -v "$BD_BIN" >/dev/null 2>&1 || {
 
 # --all matters: a finding that was filed and then closed must still escalate
 # its existing bead rather than open a fresh one.
+parse_id() {
+  node -e '
+    let s = ""; process.stdin.on("data", d => s += d).on("end", () => {
+      try {
+        const rows = JSON.parse(s);
+        if (Array.isArray(rows) && rows[0] && rows[0].id) process.stdout.write(rows[0].id);
+      } catch {}
+    });
+  ' 2>/dev/null
+}
+
 find_existing() {
-  "$BD_BIN" list --all --label "$FBKEY" --json --no-pager --limit 0 2>/dev/null \
-    | node -e '
-      let s = ""; process.stdin.on("data", d => s += d).on("end", () => {
-        try {
-          const rows = JSON.parse(s);
-          if (Array.isArray(rows) && rows[0] && rows[0].id) process.stdout.write(rows[0].id);
-        } catch {}
-      });
-    ' 2>/dev/null
+  "$BD_BIN" list --all --label "$FBKEY" --json --no-pager --limit 0 2>/dev/null | parse_id
 }
 
 LIST_OUT="$("$BD_BIN" list --all --label "$FBKEY" --json --no-pager --limit 0 2>/dev/null)"
-if [[ $? -ne 0 && -z "$LIST_OUT" ]]; then
+LIST_RC=$?
+
+# The exit status alone decides this, deliberately — NOT "failed AND printed
+# nothing". A bd that dies mid-write, or prints a usage banner before failing,
+# leaves bytes on stdout while still having answered nothing. Treating that as
+# "no bead exists" is precisely how one finding becomes two beads, which is the
+# duplicate this whole script exists to prevent. When the store cannot be read
+# we do not know the answer, so we park rather than guess it.
+if [[ $LIST_RC -ne 0 ]]; then
   park "store-unreadable" && emit "unfiled:store-unreadable"
   emit "unfiled:lost"
 fi
-EXISTING="$(find_existing)"
+
+# Reuse the lookup we already paid for rather than asking bd the same question
+# twice; find_existing stays for the post-create re-check, where a fresh read is
+# the entire point.
+EXISTING="$(printf '%s' "$LIST_OUT" | parse_id)"
 
 if [[ -n "$EXISTING" ]]; then
   # Repeat sighting: escalate. Priority is deliberately left alone — raising it
