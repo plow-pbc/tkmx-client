@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   clusterByFileOverlap,
   formatClusters,
+  parseCliOptions,
   type PullRequest,
 } from "../reporter/duplicate-prs";
 
@@ -15,7 +16,6 @@ function pr(
   return {
     number,
     title,
-    headRefName: `branch-${number}`,
     createdAt,
     files: files.map((path) => ({ path })),
   };
@@ -184,4 +184,79 @@ test("two pull requests sharing one file still cluster on a small board", () => 
     pr(2, ["alpha.ts"]),
   ]);
   assert.equal(clusters.length, 1);
+});
+
+// Both reviews caught this: the hub filter went blind exactly where
+// duplication is worst. With a floor of 2 and a `count > limit` test, a file
+// present in EVERY pull request was dropped as soon as three were open, so
+// three identical pull requests reported as no duplication at all — from a
+// tool built because nine of twenty-one were one job.
+test("three identical pull requests are not written off as hub files", () => {
+  const clusters = clusterByFileOverlap([
+    pr(1, ["alpha.ts", "beta.ts"]),
+    pr(2, ["alpha.ts", "beta.ts"]),
+    pr(3, ["alpha.ts", "beta.ts"]),
+  ]);
+  assert.equal(clusters.length, 1);
+  assert.deepEqual(
+    clusters[0].prs.map((p) => p.number),
+    [1, 2, 3],
+  );
+});
+
+test("four duplicates among six pull requests still cluster", () => {
+  const clusters = clusterByFileOverlap([
+    pr(1, ["alpha.ts", "beta.ts"]),
+    pr(2, ["alpha.ts", "beta.ts"]),
+    pr(3, ["alpha.ts", "beta.ts"]),
+    pr(4, ["alpha.ts", "beta.ts"]),
+    pr(5, ["gamma.ts", "delta.ts"]),
+    pr(6, ["epsilon.ts", "zeta.ts"]),
+  ]);
+  assert.equal(clusters.length, 1);
+  assert.equal(clusters[0].prs.length, 4);
+});
+
+// The comment on Cluster.sharedFiles names this as the case the report must
+// not misstate, so pin the branch rather than trusting the comment.
+test("a transitive cluster says so instead of showing an empty shared list", () => {
+  const clusters = clusterByFileOverlap([
+    pr(1, ["a.ts", "b.ts", "c.ts"]),
+    pr(2, ["b.ts", "c.ts", "d.ts", "e.ts"]),
+    pr(3, ["d.ts", "e.ts", "f.ts"]),
+  ]);
+  assert.deepEqual(clusters[0].sharedFiles, []);
+  assert.match(formatClusters(clusters, 3), /linked transitively/);
+});
+
+// A typo'd --threshold used to yield NaN, every `>= NaN` comparison was false,
+// and the tool printed a confident "No duplicate work found" for a run that
+// never scored anything. Failing loudly beats a clean bill of health nobody
+// earned.
+test("cli options default when the flags are absent", () => {
+  const options = parseCliOptions([]);
+  assert.equal(options.limit, 100);
+  assert.equal(options.threshold, 0.6);
+});
+
+test("cli options read explicit flags", () => {
+  const options = parseCliOptions(["--limit", "40", "--threshold", "0.8"]);
+  assert.equal(options.limit, 40);
+  assert.equal(options.threshold, 0.8);
+});
+
+test("a non-numeric threshold is rejected rather than scoring nothing", () => {
+  assert.throws(() => parseCliOptions(["--threshold", "zero-point-six"]), /threshold/);
+  assert.throws(() => parseCliOptions(["--threshold"]), /threshold/);
+});
+
+test("a threshold outside (0, 1] is rejected", () => {
+  assert.throws(() => parseCliOptions(["--threshold", "0"]), /threshold/);
+  assert.throws(() => parseCliOptions(["--threshold", "1.5"]), /threshold/);
+  assert.doesNotThrow(() => parseCliOptions(["--threshold", "1"]));
+});
+
+test("a non-numeric limit is rejected", () => {
+  assert.throws(() => parseCliOptions(["--limit", "lots"]), /limit/);
+  assert.throws(() => parseCliOptions(["--limit", "0"]), /limit/);
 });
