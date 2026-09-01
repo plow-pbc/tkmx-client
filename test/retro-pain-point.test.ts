@@ -344,3 +344,28 @@ printf '%s' '{"id":"must-not-be-created"}'
   assert.equal(parked.reason, "store-unreadable");
   assert.equal(parked.summary, GOOD[1]);
 });
+
+// The filer parks findings into .beads/ by default, and this repo is public. On
+// THIS machine .beads/ happens to be ignored via .git/info/exclude — which is
+// local, uncommitted, and absent from every other clone and from CI. So the only
+// thing that actually protects a parked finding from `git add -A` elsewhere is
+// the committed .gitignore. The check runs in a throwaway repo seeded with just
+// that file, so a local exclude cannot mask a missing rule.
+test("the parked-findings drop log is ignored by the committed .gitignore", () => {
+  const dir = tmp();
+  fs.copyFileSync(path.join(REPO_ROOT, ".gitignore"), path.join(dir, ".gitignore"));
+  execFileSync("git", ["init", "-q"], { cwd: dir });
+  fs.mkdirSync(path.join(dir, ".beads"), { recursive: true });
+  fs.writeFileSync(path.join(dir, ".beads", "retro-pain-point-drops.jsonl"), "{}\n");
+
+  let ignored = true;
+  try {
+    execFileSync("git", ["check-ignore", "-q", ".beads/retro-pain-point-drops.jsonl"], {
+      cwd: dir,
+      stdio: "ignore",
+    });
+  } catch {
+    ignored = false;
+  }
+  assert.ok(ignored, "a parked finding must never be committable in a public repo");
+});
