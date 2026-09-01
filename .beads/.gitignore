@@ -71,6 +71,15 @@ backup/
 *.db-shm
 db.sqlite
 bd.db
+# Generated git-hook wrappers: bd init writes these with the generating
+# developer's ABSOLUTE home path baked in, so they are non-portable and must
+# never land in this public repo. Regenerate locally with `bd init` instead.
+hooks/
+post-commit.bak-*
+
+# Local interaction log (per-machine runtime record, not shared state)
+interactions.jsonl
+
 # NOTE: Do NOT add negation patterns here.
 # They would override fork protection in .git/info/exclude.
 # Config files (metadata.json, config.yaml) are tracked by git by default

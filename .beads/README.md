@@ -60,8 +60,13 @@ Issues in Beads are:
 Try Beads in your own projects:
 
 ```bash
-# Install Beads
-curl -sSL https://raw.githubusercontent.com/steveyegge/beads/main/scripts/install.sh | bash
+# Install Beads. Fetch the installer, READ it, then run it -- piping a
+# branch-tracking URL straight into a shell executes whatever upstream `main`
+# happens to hold at that moment.
+curl -sSL -o /tmp/beads-install.sh \
+  https://raw.githubusercontent.com/steveyegge/beads/main/scripts/install.sh
+less /tmp/beads-install.sh   # review before executing
+bash /tmp/beads-install.sh
 
 # Initialize in your repo
 bd init
