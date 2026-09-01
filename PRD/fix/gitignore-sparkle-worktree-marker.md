@@ -1,3 +1,31 @@
+## Progress Update as of 2026-08-31 18:20 PDT
+*(Most recent updates at top)*
+
+### Summary of changes since last update
+Restored the `.sparkle/` rule in `.gitignore`. The previous commit (`2531aaa`, the test
+refactor) accidentally committed the *verification probe* along with the refactor: to prove the
+new assertion could fail, `.gitignore` was reverted locally — and that revert was staged into
+the commit and pushed. CI then failed on exactly the test the commit was meant to strengthen
+(`not ok 48 - Sparkle's per-worktree marker is ignored by the committed .gitignore`, `# fail 1`).
+
+### Detail of changes made:
+- `.gitignore`: re-added the `.sparkle/` rule and its comment. This is the only change; the
+  test in `test/gitignore.test.ts` is untouched and its refactor stands.
+- The accidental revert is itself the strongest evidence the test works as designed: it is the
+  precise scenario the assertion exists to catch (committed fix missing), and CI caught it on
+  the first push rather than letting the branch merge green.
+- Verified: `node --test dist/test/gitignore.test.js` → 3/3 pass; `npm run typecheck` clean.
+- Note for the next agent: the FULL local suite fails ~30 unrelated cases on a developer machine
+  (real `agentsview` binary on PATH, real agent config dirs), while CI runs them green. Judge
+  this branch by CI, not by a local `npm test`.
+
+### Beads activity:
+- No bead state change; branch work refs builder-index-client-wfe.
+
+### Potential concerns to address:
+- Committing a deliberate "make the test fail" probe is an easy foot-gun: the probe and the real
+  change touch the same file, so `git commit -a` sweeps it in. Filed as a Sparkle pain point.
+
 ## Progress Update as of 2026-08-31 15:30 PDT
 *(Most recent updates at top)*
 
