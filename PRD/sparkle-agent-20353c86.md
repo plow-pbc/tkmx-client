@@ -1,4 +1,44 @@
 # Progress — sparkle/agent-20353c86-ff69-4bd2-bd78-66300b7da550
+## Progress Update as of 2026-08-31, roborev drain Pacific
+*(Most recent updates at top)*
+
+### Summary of changes since last update
+Drained every content finding on this branch to zero and found, while doing it,
+that roborev has silently stopped reviewing: the last three jobs failed on agent
+QUOTA, not on content. Filed as builder-index-client-v36 (P1).
+
+### Detail of changes made:
+- Closed the three remaining findings (42598c4/72322, c357dd0/72321,
+  570f82a/71780). All three were "No issues found" — read, not assumed.
+- The real discovery: jobs 73778, 73774 and 73036 show `status=failed` after
+  3-4s. `roborev show <sha>` says "no review found", which reads like nothing
+  happened. The reason is only in `roborev list --json`:
+    "You've hit your weekly limit - resets Sep 2 at 7pm: exit status 1"
+- Why that is a defect and not just a quota notice: the pre-push hook blocks
+  only on unresolved FAIL (F) verdicts. A FAILED job yields NO verdict, so it is
+  not a FAIL, so the gate does not block. Quota exhaustion silently converts
+  "reviewed and passed" into "never reviewed" while the push outcome stays
+  identical. My last three commits are on the remote unreviewed.
+- Same shape as builder-index-client-6w9 one layer up: a gate that no-ops
+  quietly is indistinguishable from a gate that passed. That is now two
+  independent instances of the same failure mode in this repo's tooling.
+- Impact window ~2 days (resets 2026-09-02 19:00 America/Los_Angeles), during
+  which every commit on this machine pushes unreviewed.
+
+### Beads activity:
+- Opened builder-index-client-v36 (P1): roborev quota exhaustion silently
+  downgrades the push gate. Includes the three job ids, the exact error, and
+  three fix options (warn on failed jobs, surface the error in `list`/`show`,
+  auto-requeue after reset).
+- Closed roborev jobs 72322, 72321, 71780.
+
+### Potential concerns to address:
+- MERGE STATE UNCHANGED: PR 88 is OPEN, CLEAN, mergedAt=null. It has been green
+  and waiting on a human for hours. `gh pr merge` is refused by policy
+  (merge-protected-repos.json), so there is no agent-side action that lands it.
+- This branch remains RECORD-ONLY and deliberately has no PR: 42598c4 duplicates
+  open PRs 83/84, c48f97f duplicates open PR 70.
+
 ## Progress Update as of 2026-08-31, PR 88 correction Pacific
 *(Most recent updates at top)*
 
