@@ -146,6 +146,21 @@ interface AgentsviewJson {
 
 export type AgentsviewUsageByAgent = Record<string, DailyUsage[]>;
 
+// Builder Index needs usage accounting, not a second transcript viewer. Keep
+// its index physically separate from the normal AgentsView archive so usage
+// reporting stays compact and cannot change the archive used by the UI.
+export function reportingAgentsviewEnv(
+  env: NodeJS.ProcessEnv = process.env,
+): Record<string, string> {
+  const home = env.HOME || env.USERPROFILE || "";
+  return {
+    AGENTSVIEW_DATA_DIR:
+      env.AGENTSVIEW_REPORTING_DATA_DIR
+      || path.join(home, ".agentsview-builder-index"),
+    AGENTSVIEW_USAGE_ONLY: "1",
+  };
+}
+
 // Which agents to collect comes from the local index, not a list in this file.
 // AgentsView grows parsers between releases — 0.25 already handles copilot,
 // gemini, cursor, iflow and amp beyond the four this used to name — and a
@@ -233,6 +248,10 @@ export function parseAgentsviewOutput(parsed: AgentsviewJson, source: string): D
 // The syncing calls below carry the guard; reads always use --no-sync.
 const WARP_SKIP_DIR = "/var/empty";
 const DIRECT_SYNC_TIMEOUT_MS = 60 * 60 * 1000;
+const SYNC_BUSY_RETRY_MS = 1000;
+const SYNC_RETRY_SIGNAL = new Int32Array(
+  new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT),
+);
 
 function queryAgent(
   bin: string,
@@ -242,10 +261,16 @@ function queryAgent(
   extraEnv?: Record<string, string>,
 ): DailyUsage[] {
   const args = ["usage", "daily", "--json", "--breakdown", "--agent", agent, "--since", since, "--no-sync"];
+  const env: NodeJS.ProcessEnv = { ...process.env, ...extraEnv };
+  // AGENTSVIEW_NO_DAEMON=1 is useful for the preceding direct sync, but
+  // current AgentsView intentionally rejects direct SQLite reads for this
+  // command. Agent shells may set it globally, so scope it away here and let
+  // the supported query transport start or reuse the local daemon.
+  delete env.AGENTSVIEW_NO_DAEMON;
   const execOpts: Parameters<typeof execFileSync>[2] = {
     encoding: "utf-8",
     timeout: timeoutMs,
-    env: { ...process.env, ...extraEnv },
+    env,
   };
   let raw: string;
   try {
@@ -265,24 +290,19 @@ function queryAgent(
 // so an agent whose first session landed since the last sync has to be written
 // before we look.
 //
-// Why not fold sync into the query (the old behavior)? agentsview's data
-// sync — any write path, including a bare `agentsview sync` — DEADLOCKS when
-// the reporter runs under macOS launchd: the writer hangs forever inside
-// sqlite3_open_v2 (0% CPU, all goroutines parked) while read-only queries
-// (`--no-sync`) are completely unaffected. It is intrinsic to launchd's
-// spawn context, not the environment: it reproduces across agentsview
-// versions and survives ProcessType=Interactive, login-shell wrappers, a
-// fully-replicated launchd env, raised rlimits, and GOMAXPROCS=1. A query
-// that triggers sync therefore hangs until its timeout SIGKILLs it, the
-// transaction rolls back, and the report fails outright — every 2h, forever
-// (the symptom that motivated this change).
+// Why not fold sync into the query (the old behavior)? A direct AgentsView
+// writer can deadlock under macOS launchd while read-only queries (`--no-sync`)
+// remain unaffected. Keeping refresh separate lets launchd use AgentsView's
+// daemon-backed writer and keeps every usage read read-only.
 //
 // So we ALWAYS read with --no-sync (deadlock-free) and run sync on its own:
 //   - Outside launchd, sync writes directly without daemon startup. It is
 //     strict and gets a long budget because schema upgrades can rebuild very
 //     large indexes before the report reads them.
-//   - Under launchd, the timeout reaps the deadlocked sync and we report the
-//     last successfully-synced snapshot instead of nothing.
+//   - Under launchd, sync clears any inherited direct-mode override and uses
+//     the daemon transport. If that refresh still fails, its bounded timeout
+//     preserves the last successfully-synced snapshot instead of losing the
+//     entire report.
 // Best-effort under launchd does NOT open the silent-skip hole, because discoverAgents
 // still throws when the index can't be read at all: a machine that has never
 // synced aborts loudly rather than POSTing zero usage as a quiet day. The
@@ -297,15 +317,33 @@ export function syncAgentsview(
   timeoutMs: number = 90000,
   extraEnv?: Record<string, string>,
 ): boolean {
-  const execOpts = syncExecOptions(timeoutMs, extraEnv, false);
-  try {
-    execFileSync(bin, ["sync"], execOpts);
-    return true;
-  } catch (err) {
-    const detail = syncFailureDetail(err);
-    console.error(`  agentsview sync skipped (${detail}); reading last-synced data`);
-    return false;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      execFileSync(
+        bin,
+        ["sync"],
+        syncExecOptions(Math.max(1, deadline - Date.now()), extraEnv, false),
+      );
+      return true;
+    } catch (err) {
+      const detail = syncFailureDetail(err);
+      // A cold daemon can briefly hold its sync mutex for startup work. Wait
+      // within the existing deadline so the report reads the completed refresh
+      // instead of immediately falling back to an older snapshot.
+      if (detail.includes("sync already in progress")) {
+        const waitMs = Math.min(SYNC_BUSY_RETRY_MS, deadline - Date.now());
+        if (waitMs > 0) {
+          Atomics.wait(SYNC_RETRY_SIGNAL, 0, 0, waitMs);
+          continue;
+        }
+      }
+      console.error(`  agentsview sync skipped (${detail}); reading last-synced data`);
+      return false;
+    }
   }
+  console.error("  agentsview sync skipped (retry deadline exceeded); reading last-synced data");
+  return false;
 }
 
 function syncExecOptions(
@@ -318,7 +356,13 @@ function syncExecOptions(
     ...extraEnv,
     WARP_DIR: WARP_SKIP_DIR,
   };
-  if (direct) env.AGENTSVIEW_NO_DAEMON = "1";
+  if (direct) {
+    env.AGENTSVIEW_NO_DAEMON = "1";
+  } else {
+    // Agent shells set this globally. A launchd refresh needs AgentsView's
+    // daemon-backed writer because its direct writer can deadlock there.
+    delete env.AGENTSVIEW_NO_DAEMON;
+  }
 
   const execOpts: Parameters<typeof execFileSync>[2] = {
     encoding: "utf-8",
@@ -362,10 +406,11 @@ export function collectAgentsviewUsage(
   sinceStr: string,
   timeoutMs: number = 180000,
 ): AgentsviewUsageByAgent {
+  const reportingEnv = reportingAgentsviewEnv();
   if (process.env.XPC_SERVICE_NAME === LAUNCHD_LABEL) {
-    syncAgentsview(bin);
+    syncAgentsview(bin, 90000, reportingEnv);
   } else {
-    syncAgentsviewOrThrow(bin, DIRECT_SYNC_TIMEOUT_MS);
+    syncAgentsviewOrThrow(bin, DIRECT_SYNC_TIMEOUT_MS, reportingEnv);
   }
 
   const since = toIsoDate(sinceStr);
@@ -375,8 +420,10 @@ export function collectAgentsviewUsage(
   // copilot, etc. Every read below then runs with --no-sync so none of them can
   // hit the launchd sync deadlock.
   const usageByAgent: AgentsviewUsageByAgent = {};
-  for (const agent of discoverAgents()) {
-    usageByAgent[agent] = queryAgent(bin, since, agent, timeoutMs);
+  for (const agent of discoverAgents({ ...process.env, ...reportingEnv })) {
+    usageByAgent[agent] = queryAgent(
+      bin, since, agent, timeoutMs, reportingEnv,
+    );
   }
   return usageByAgent;
 }

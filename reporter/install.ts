@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import * as os from "node:os";
 
 // PROJECT_ROOT is the actual checked-out repo, not dist/. After build, this
@@ -9,6 +9,37 @@ export const PROJECT_ROOT = path.resolve(__dirname, "..", "..");
 export const REPORT_SCRIPT = path.join(PROJECT_ROOT, "dist", "reporter", "report.js");
 export const LAUNCHD_LABEL = "com.token-tracking.reporter";
 export const SYSTEMD_UNIT_BASENAME = "token-tracking-reporter";
+
+export interface LaunchdInstallInputs {
+  uid: number;
+  label: string;
+  plistPath: string;
+}
+
+export interface LaunchdCommand {
+  file: "/bin/launchctl";
+  args: string[];
+  tolerateFailure?: boolean;
+}
+
+// Pure command plan for the logged-in user's launchd domain. `load` and
+// `unload` are legacy compatibility verbs; bootstrap/enable is the supported
+// registration path and survives reboot through the plist in LaunchAgents.
+// Keeping argv separate from the executable also avoids a shell entirely.
+export function buildLaunchdInstallCommands({ uid, label, plistPath }: LaunchdInstallInputs): LaunchdCommand[] {
+  if (!Number.isSafeInteger(uid) || uid <= 0) {
+    throw new Error("Launchd installation must run as the logged-in user, never root");
+  }
+  const domain = `gui/${uid}`;
+  const service = `${domain}/${label}`;
+  return [
+    { file: "/bin/launchctl", args: ["bootout", service], tolerateFailure: true },
+    { file: "/bin/launchctl", args: ["enable", service] },
+    { file: "/bin/launchctl", args: ["bootstrap", domain, plistPath] },
+    { file: "/bin/launchctl", args: ["kickstart", "-k", service] },
+    { file: "/bin/launchctl", args: ["print", service] },
+  ];
+}
 
 // `process.execPath` points at the real on-disk node binary, which on Homebrew
 // is a versioned Cellar path like `/opt/homebrew/Cellar/node/25.8.1_1/bin/node`.
@@ -152,16 +183,22 @@ function installLaunchd(): void {
     logPath,
   });
 
-  // Unload first if already loaded
-  try {
-    execSync(`launchctl unload "${plistPath}" 2>/dev/null`);
-  } catch {}
-
+  fs.mkdirSync(path.dirname(plistPath), { recursive: true });
+  fs.mkdirSync(path.dirname(logPath), { recursive: true });
   fs.writeFileSync(plistPath, plist);
+  fs.chmodSync(plistPath, 0o644);
   console.log(`Wrote ${plistPath}`);
 
-  execSync(`launchctl load "${plistPath}"`);
-  console.log(`Loaded ${LAUNCHD_LABEL} — will run every 2 hours and once now`);
+  const uid = process.getuid?.();
+  if (uid === undefined) throw new Error("Cannot determine the logged-in user id for launchd");
+  for (const command of buildLaunchdInstallCommands({ uid, label: LAUNCHD_LABEL, plistPath })) {
+    try {
+      execFileSync(command.file, command.args, { encoding: "utf-8" });
+    } catch (err) {
+      if (!command.tolerateFailure) throw err;
+    }
+  }
+  console.log(`Bootstrapped and verified ${LAUNCHD_LABEL} — runs every 2 hours and once now`);
 }
 
 function installSystemd(): void {
@@ -184,7 +221,7 @@ function installSystemd(): void {
   fs.writeFileSync(timerPath, timer);
   console.log(`Wrote ${timerPath}`);
 
-  execSync("systemctl --user daemon-reload");
-  execSync(`systemctl --user enable --now ${SYSTEMD_UNIT_BASENAME}.timer`);
+  execFileSync("systemctl", ["--user", "daemon-reload"], { stdio: "inherit" });
+  execFileSync("systemctl", ["--user", "enable", "--now", `${SYSTEMD_UNIT_BASENAME}.timer`], { stdio: "inherit" });
   console.log(`Enabled and started ${SYSTEMD_UNIT_BASENAME}.timer`);
 }

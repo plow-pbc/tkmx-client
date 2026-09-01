@@ -40,6 +40,7 @@ test("parseUsageLine extracts usage from an assistant message", () => {
     timestamp: "2026-05-25T19:19:55.663Z",
     message: {
       role: "assistant",
+      content: "TRANSCRIPT_SENTINEL_OPENCLAW",
       model: "anthropic/claude-sonnet-4-6",
       provider: "plow",
       api: "openai-completions",
@@ -61,6 +62,11 @@ test("parseUsageLine extracts usage from an assistant message", () => {
     totalTokens: 31890,
     responseId: "chatcmpl-369386b2",
   });
+  assert.doesNotMatch(
+    JSON.stringify(parseUsageLine(line)),
+    /TRANSCRIPT_SENTINEL_OPENCLAW/,
+    "assistant content must stay local even when its aggregate usage is counted",
+  );
 });
 
 test("parseUsageLine returns null for non-message lines", () => {

@@ -73,7 +73,7 @@ const args = process.argv.slice(1);
 const cmd = path.basename(args[0] || "");
 if (cmd !== "usage" && cmd !== "stats" && cmd !== "sync") return;
 args[0] = cmd;
-const envCols = ["CODEX_SESSIONS_DIR", "CLAUDE_PROJECTS_DIR", "PIEBALD_DIR", "OPENCODE_DIR", "AGENT_VIEWER_DATA_DIR"].map((k) => k + "=" + (process.env[k] || ""));
+const envCols = ["CODEX_SESSIONS_DIR", "CLAUDE_PROJECTS_DIR", "PIEBALD_DIR", "OPENCODE_DIR", "AGENT_VIEWER_DATA_DIR", "AGENTSVIEW_DATA_DIR", "AGENTSVIEW_USAGE_ONLY"].map((k) => k + "=" + (process.env[k] || ""));
 fs.appendFileSync(${JSON.stringify(argvLog)}, args.concat(envCols).join("\\t") + "\\n");
 if (cmd === "sync") { process.exit(0); }
 if (cmd === "usage") {
@@ -88,7 +88,7 @@ let since = "";
 for (let i = 0; i < args.length; i++) {
   if (args[i] === "--since") since = args[i + 1] || "";
 }
-console.log(JSON.stringify({ schema_version: 1, window: { days_arg: since }, totals: { sessions_all: 7 }, generated_at: "2026-04-24T00:00:00Z" }));
+console.log(JSON.stringify({ schema_version: 1, window: { days: since === "28d" ? 28 : 0, transcript: "TRANSCRIPT_SENTINEL_E2E" }, totals: { sessions_all: 7 }, generated_at: "2026-04-24T00:00:00Z", transcript: "TRANSCRIPT_SENTINEL_E2E" }));
 process.exit(0);
 `,
     );
@@ -104,7 +104,7 @@ FAIL_USAGE_ENV_VALUE=${shQuote(failUsageEnvValue)}`;
     `#!/usr/bin/env bash
 ${failUsageConfig}
 printf '%s\\t' "$@" >> "${argvLog}"
-printf 'CODEX_SESSIONS_DIR=%s\\tCLAUDE_PROJECTS_DIR=%s\\tPIEBALD_DIR=%s\\tOPENCODE_DIR=%s\\tAGENT_VIEWER_DATA_DIR=%s\\t' "$CODEX_SESSIONS_DIR" "$CLAUDE_PROJECTS_DIR" "$PIEBALD_DIR" "$OPENCODE_DIR" "$AGENT_VIEWER_DATA_DIR" >> "${argvLog}"
+printf 'CODEX_SESSIONS_DIR=%s\\tCLAUDE_PROJECTS_DIR=%s\\tPIEBALD_DIR=%s\\tOPENCODE_DIR=%s\\tAGENT_VIEWER_DATA_DIR=%s\\tAGENTSVIEW_DATA_DIR=%s\\tAGENTSVIEW_USAGE_ONLY=%s\\t' "$CODEX_SESSIONS_DIR" "$CLAUDE_PROJECTS_DIR" "$PIEBALD_DIR" "$OPENCODE_DIR" "$AGENT_VIEWER_DATA_DIR" "$AGENTSVIEW_DATA_DIR" "$AGENTSVIEW_USAGE_ONLY" >> "${argvLog}"
 printf '\\n' >> "${argvLog}"
 case "$1" in
   sync)
@@ -135,7 +135,7 @@ case "$1" in
         SINCE="\${!j}"
       fi
     done
-    printf '{"schema_version":1,"window":{"days_arg":"%s"},"totals":{"sessions_all":7},"generated_at":"2026-04-24T00:00:00Z"}\\n' "$SINCE"
+    printf '{"schema_version":1,"window":{"days":28,"transcript":"TRANSCRIPT_SENTINEL_E2E"},"totals":{"sessions_all":7},"generated_at":"2026-04-24T00:00:00Z","transcript":"TRANSCRIPT_SENTINEL_E2E"}\\n'
     ;;
   *)
     echo "unexpected: $*" >&2
@@ -156,7 +156,7 @@ async function setupE2E({ dailyJson, failUsageEnvKey = "", failUsageEnvValue = "
   // baseEnv sets HOME to tmp, so discoverAgents() reads this index rather than
   // the developer's real one — which would otherwise make these assertions
   // depend on whichever agents the machine running the suite happens to have.
-  writeFakeIndex(path.join(tmp, ".agentsview"), indexAgents);
+  writeFakeIndex(path.join(tmp, ".agentsview-builder-index"), indexAgents);
   const argvLog = path.join(tmp, "argv.log");
   const fakeScript = path.join(tmp, process.platform === "win32" ? "fake-agentsview-preload.cjs" : "fake-agentsview");
   writeFakeAgentsview(fakeScript, argvLog, dailyJson, failUsageEnvKey, failUsageEnvValue);
@@ -254,6 +254,22 @@ test("REPORT_DAYS=1 still invokes agentsview with --since 28d for session_stats"
 
     const argvLines = fs.readFileSync(ctx.argvLog, "utf-8").trim().split("\n");
     const statsInvocations = argvLines.filter((l) => l.startsWith("stats\t"));
+    const reportingDataDir = path.join(
+      ctx.baseEnv.HOME, ".agentsview-builder-index",
+    );
+    const reportingInvocations = argvLines.filter(
+      (l) => l.startsWith("sync\t") || l.startsWith("usage\t"),
+    );
+    for (const line of reportingInvocations) {
+      assert.ok(
+        line.includes(`AGENTSVIEW_DATA_DIR=${reportingDataDir}`),
+        `reporting invocation should use ${reportingDataDir}: ${line}`,
+      );
+      assert.ok(
+        line.includes("AGENTSVIEW_USAGE_ONLY=1"),
+        `reporting invocation should use usage-only storage: ${line}`,
+      );
+    }
     assert.ok(
       statsInvocations.length >= 1,
       `expected at least one 'stats' invocation, got ${argvLines.join(" | ")}`,
@@ -266,9 +282,14 @@ test("REPORT_DAYS=1 still invokes agentsview with --since 28d for session_stats"
       );
     }
     assert.equal(
-      captured.session_stats?.window?.days_arg,
-      "28d",
+      captured.session_stats?.window?.days,
+      28,
       "POSTed session_stats should reflect the 28d window that agentsview was asked for",
+    );
+    assert.doesNotMatch(
+      JSON.stringify(captured),
+      /TRANSCRIPT_SENTINEL_E2E/,
+      "the final POST body must exclude transcript-shaped Agentsview fields",
     );
     assert.equal(captured.report_days, 1);
   } finally {
@@ -483,8 +504,8 @@ test("inactive day (no usage rows) still posts and still refreshes session_stats
       "session_stats should still be collected and sent on an inactive day",
     );
     assert.equal(
-      captured.session_stats.window?.days_arg,
-      "28d",
+      captured.session_stats.window?.days,
+      28,
       "session_stats must still reflect the 28d window, not REPORT_DAYS=1",
     );
     // Sanity: stats invocation still happened despite no usage rows.

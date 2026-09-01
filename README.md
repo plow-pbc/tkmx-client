@@ -22,7 +22,7 @@ npm run install-service           # auto-report every 2 hours
 
 ### 1. Install dependencies
 
-[agentsview](https://www.agentsview.io/token-usage/) is required — it reads your local agent usage data from an incrementally-synced SQLite index, and the reporter collects every agent that index holds, which is dramatically faster than walking every transcript on each report.
+[agentsview](https://www.agentsview.io/token-usage/) is required — it reads your local agent usage data from an incrementally-synced SQLite index, and the reporter collects every agent that index holds, which is dramatically faster than walking every transcript on each report. Builder Index uses a dedicated usage-only index at `~/.agentsview-builder-index`; it keeps accounting metadata while omitting message and tool bodies.
 
 **macOS / Linux:**
 
@@ -94,6 +94,7 @@ cp .env.example .env
 | `AVATAR` | No | **Not active yet — needs server support.** A picture for your profile, intended to replace the generated letter avatar. Either an `https://` image URL, `gravatar:you@example.com`, or `github:yourhandle`. https only; the Gravatar form hashes your address locally so your email never leaves your machine. The client reports it, but the profile page does not render it yet, so setting this has no visible effect today. |
 | `OPENCLAW_SESSIONS_DIRS` | No | Override OpenClaw auto-discovery with a comma-separated list of session directories. Defaults to auto-discovery of standalone + Plow variants on macOS. See [OpenClaw Usage](#openclaw-usage). |
 | `REPORT_DAYS` | No | Days of history to report (default: `28`). See [Backfill & Optimization](#backfill--optimization) |
+| `AGENTSVIEW_REPORTING_DATA_DIR` | No | Override the dedicated Builder Index AgentsView archive (default: `~/.agentsview-builder-index`). |
 | `REPORT_MACHINE_CONFIG` | No | Set to `true` to share machine info (OS, CPU, memory, installed skills, MCP servers, hooks, CLAUDE.md stats, shell/editor) on your profile. No prompts, code, or keys are ever sent. |
 | `SKILLS_EXCLUDE` | No | Comma-separated skill or MCP server names to keep off your profile, e.g. `warp,clerk-setup`. Case-insensitive. See [Which skills get reported](#which-skills-get-reported). |
 | `REPORT_DEV_STATS` | No | Set to `true` to share how you code — tool-call frequencies, session stats, cache efficiency, git outcome metrics (commits/LOC/PRs), and Cursor AI attribution. No file paths, prompts, or code are ever sent. See [Dev Stats](#dev-stats). |
@@ -179,7 +180,7 @@ v1.3.0 replaces `ccusage` + the direct codex sqlite reader with [agentsview](htt
 1. **Correct codex token counts.** v1.x's `~/.codex/state_*.sqlite` reader was silently dropping cache-read tokens. Expect your **codex `total_tokens` to jump ~+90%** on active codex machines (Claude numbers are unaffected). This is agentsview counting tokens that were always being spent but never appearing in your reports — **a correction, not inflation.** Nothing is double-counted.
 2. **Accurate cost.** agentsview computes per-field cost via LiteLLM and the server respects it, so codex dollar figures on your profile go from server-side blended estimates to actual per-model rates.
 3. **~200× faster** on large histories via agentsview's incremental SQLite sync, instead of walking every JSONL transcript on every run.
-4. **Bonus: free session viewer.** You now have `agentsview` installed — run `agentsview` in a terminal and you get a full local web UI for browsing and full-text-searching every Claude + Codex session you've ever had. It's a real product, not a data-access tool. See https://agentsview.io for the full feature set.
+4. **Bonus: free session viewer.** You now have `agentsview` installed — run `agentsview` in a terminal to build and browse its standard local archive. Builder Index keeps its compact reporting archive separate. See https://agentsview.io for the full feature set.
 5. **Single install story going forward.** One dependency to install, not "ccusage or codex-sqlite-reader depending on which flag you set."
 
 **If you can install agentsview:** `git pull`, install agentsview, run `npm run report`. That's it — existing `.env` settings are unchanged. The `USE_AGENTSVIEW` flag and `CCUSAGE_TIMEOUT_MS` are gone (delete them from your `.env` if present — they're ignored).
@@ -440,7 +441,7 @@ You don't need to worry about pricing — the server handles it.
 
 ## How It Works
 
-[`agentsview`](https://www.agentsview.io/token-usage/) is the required local usage collector. It maintains its own sqlite database synced from supported local agent data directories. The reporter runs `agentsview sync`, reads the agents that index actually holds (`SELECT DISTINCT agent FROM sessions`), and then queries each one via `agentsview usage daily --json --breakdown --agent <agent> --no-sync`. Sync comes first because discovery reads the index: an agent whose first session landed since the last sync has to be written before we look.
+[`agentsview`](https://www.agentsview.io/token-usage/) is the required local usage collector. The reporter sets `AGENTSVIEW_DATA_DIR=~/.agentsview-builder-index` and `AGENTSVIEW_USAGE_ONLY=1`, then runs `agentsview sync`, reads the agents that index actually holds (`SELECT DISTINCT agent FROM sessions`), and queries each one via `agentsview usage daily --json --breakdown --agent <agent> --no-sync`. The dedicated index retains exact accounting metadata and omits transcript text, thinking text, tool calls, tool results, and content-derived titles. Sync comes first because discovery reads the index: an agent whose first session landed since the last sync has to be written before we look.
 
 Deriving the list from the index rather than naming agents means whatever agentsview learns to parse — it already handles copilot, gemini, cursor, iflow and amp beyond claude/codex/pi/opencode — is collected the first time it writes a session, with no client release.
 
