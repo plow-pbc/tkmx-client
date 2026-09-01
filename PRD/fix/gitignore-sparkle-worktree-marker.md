@@ -1,3 +1,40 @@
+## Progress Update as of 2026-08-31 18:45 PDT
+*(Most recent updates at top)*
+
+### Summary of changes since last update
+Closed a real hole roborev found in the source assertion, and corrected a comment that claimed a
+causal chain this checkout contradicts.
+
+### Detail of changes made:
+- `test/gitignore.test.ts`: the assertion was `assert.match(output, /(?:^|[\\/])\.gitignore:/)`,
+  which accepts an ABSOLUTE path ending `/.gitignore` — precisely what `core.excludesFile` set to
+  `~/.gitignore` produces. That is a per-machine override, the one thing the test exists to
+  reject, so the test was looser than its own docstring. Git reports the in-tree top-level file
+  as the literal relative path `.gitignore`, and every other source as an absolute path, so the
+  assertion is now a `.gitignore:` PREFIX (`output.startsWith`).
+- `.gitignore`: the comment asserted the marker "left every agent worktree permanently dirty".
+  Not true on this checkout — both `.git/worktrees/<id>/info/exclude:5` and the common
+  `.git/info/exclude:17` already carry `.sparkle/`. Reworded to what is actually load-bearing:
+  the in-tree rule is what makes the exclusion PORTABLE to a machine without those local
+  excludes. CI is that machine, and it is why the missing rule failed there and not here.
+- Verified in a throwaway clone under the scratchpad, never in the working tree — the working
+  tree is how the probe got committed last time. Four cases, `check-ignore -v` source shown:
+  - committed rule present -> `.gitignore:15:` -> passes.
+  - rule removed, `.git/info/exclude` override -> `.git/info/exclude:7:` -> fails. Correct.
+  - rule removed, `core.excludesFile` pointing at a file literally named `.gitignore` ->
+    `/…/fakehome/.gitignore:1:` -> OLD regex matched (would have wrongly PASSED, the hole);
+    new prefix check rejects it. Correct.
+- `npm run typecheck` clean; `node --test dist/test/gitignore.test.js` 3/3.
+
+### Beads activity:
+- No bead state change; branch work refs builder-index-client-wfe.
+
+### Potential concerns to address:
+- Roborev's third finding is a general hazard worth remembering: a rationale comment that records
+  an OBSERVED causal chain will be trusted by the next agent debugging that symptom. Here the
+  observation was wrong (local excludes already covered the path) while the fix was still right,
+  so the comment would have sent someone chasing the wrong cause.
+
 ## Progress Update as of 2026-08-31 18:20 PDT
 *(Most recent updates at top)*
 

@@ -78,28 +78,30 @@ test(".env.example stays committable despite the broad .env* rule", () => {
 });
 
 // Sparkle drops `.sparkle/merge-policy.json` into every agent worktree it cuts.
-// While that path was unignored it left every agent worktree permanently dirty,
-// which is enough for worktree teardown to refuse ("holds uncommitted changes")
-// and strand the worktree.
+// Nothing in this repo reads it, so it is ignored in-tree rather than left to
+// each machine's `.git/info/exclude` — an unignored marker keeps a worktree
+// permanently dirty, and a dirty worktree is enough for teardown to refuse.
 //
 // This asserts the rule comes from the committed `.gitignore` specifically, not
-// merely that the path is ignored *somewhere*. An agent hitting the problem is
-// likely to have patched its own `.git/info/exclude` as a local workaround — and
-// under a plain `check-ignore` that workaround makes this test pass on a
-// checkout where the committed fix was never made, which is the one outcome
-// that would leave the next agent stranded with a green suite.
+// merely that the path is ignored *somewhere*. Both halves of that matter: a
+// developer machine that already carries a local `.sparkle/` exclude (this one
+// does, in two places) would pass a plain `check-ignore` on a checkout where the
+// committed fix was never made — a green suite that strands the next agent.
 //
-// `check-ignore -v` prints `<source>:<line>:<pattern>\t<path>`; a local override
-// reports an absolute path ending `/info/exclude` instead. A path that is not
-// ignored at all exits 1, which throws here — also a failure, which is correct.
+// `check-ignore -v` prints `<source>:<line>:<pattern>\t<path>`. Git reports the
+// in-tree top-level file as the literal relative path `.gitignore`, while every
+// other source is an absolute path — so the assertion is a `.gitignore:` PREFIX,
+// not a suffix or a loose match. A suffix would accept `core.excludesFile` set
+// to `~/.gitignore`, which is a per-machine override and exactly what this
+// rejects. A path that is not ignored at all exits 1, which throws here — also a
+// failure, which is correct.
 test("Sparkle's per-worktree marker is ignored by the committed .gitignore", () => {
   const output = execFileSync(
     "git", ["check-ignore", "-v", "--no-index", ".sparkle/merge-policy.json"],
     { cwd: REPO_ROOT, encoding: "utf8" },
   );
-  assert.match(
-    output,
-    /(?:^|[\\/])\.gitignore:/,
-    `.sparkle/ must be ignored by the committed .gitignore, not by a local override. A .git/info/exclude workaround only helps the machine that made it.`,
+  assert.ok(
+    output.startsWith(".gitignore:"),
+    `.sparkle/ must be ignored by the committed .gitignore, not by a local override — got "${output.trim()}". A .git/info/exclude or core.excludesFile workaround only helps the machine that made it.`,
   );
 });
