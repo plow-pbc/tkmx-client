@@ -1,3 +1,33 @@
+## Progress Update as of 2026-09-01 09:40 PDT
+*(Most recent updates at top)*
+
+### Summary of changes since last update
+Collapsed the test's rationale block from 20 lines to 10 (roborev 73878). Comment only; the
+assertion and its behaviour are untouched.
+
+### Detail of changes made:
+- Roborev's point was not that the text was wrong — job 73877 reviewed the same commit and found
+  no issues, and 73878 agreed the corrected claim is accurate. It was that the block had been
+  rewritten twice in three commits and was 20 lines guarding a 4-line assertion whose failure
+  message already says the same thing. Churn, not convergence.
+- Kept the two load-bearing sentences: the assertion must prove the rule is COMMITTED (a machine
+  with a local `.sparkle/` exclude passes a plain `check-ignore` on a checkout missing the fix,
+  stranding the next agent behind a green suite), and therefore a `.gitignore:` prefix, since
+  every override prints a different anchor. Dropped the output-format restatement, the exit-1
+  aside and the tilde-expansion example — all inferable from the four lines beneath them, and all
+  of them what kept attracting edits.
+- This is the consolidation the reviewer asked for, done once. The comment is now closed to
+  further wording passes on this branch.
+- Verified: `npm run typecheck` clean; `node --test dist/test/gitignore.test.js` 3/3.
+
+### Beads activity:
+- No bead state change; branch work refs builder-index-client-wfe.
+
+### Potential concerns to address:
+- Three review-driven edits to one comment is a signal in itself: a rationale block long enough
+  to restate what the code below it already says will keep drawing findings. Prefer the short
+  form on the first pass.
+
 ## Progress Update as of 2026-09-01 09:05 PDT
 *(Most recent updates at top)*
 

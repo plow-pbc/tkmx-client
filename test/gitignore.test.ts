@@ -78,25 +78,15 @@ test(".env.example stays committable despite the broad .env* rule", () => {
 });
 
 // Sparkle drops `.sparkle/merge-policy.json` into every agent worktree it cuts.
-// Nothing in this repo reads it, so it is ignored in-tree rather than left to
-// each machine's `.git/info/exclude` — an unignored marker keeps a worktree
-// permanently dirty, and a dirty worktree is enough for teardown to refuse.
+// Nothing here reads it, and an unignored marker keeps the worktree permanently
+// dirty — enough for teardown to refuse and strand it.
 //
-// This asserts the rule comes from the committed `.gitignore` specifically, not
-// merely that the path is ignored *somewhere*. Both halves of that matter: a
-// developer machine that already carries a local `.sparkle/` exclude (this one
-// does, in two places) would pass a plain `check-ignore` on a checkout where the
-// committed fix was never made — a green suite that strands the next agent.
-//
-// `check-ignore -v` prints `<source>:<line>:<pattern>\t<path>`. Git reports that
-// source relative to cwd when it lives inside the worktree (`.gitignore`,
-// `.git/info/exclude`) and absolute for `core.excludesFile` — so what separates
-// the committed top-level file from either override is where the match is
-// ANCHORED, hence a `.gitignore:` prefix rather than a suffix or a loose match.
-// A suffix would accept `core.excludesFile` set to `~/.gitignore`: git prints
-// that as `/Users/<someone>/.gitignore:1:`, a per-machine override and exactly
-// what this rejects. A path that is not ignored at all exits 1, which throws
-// here — also a failure, which is correct.
+// This asserts the rule is COMMITTED, not merely that the path is ignored: a
+// machine carrying a local `.sparkle/` exclude (this one does, in two places)
+// would pass a plain `check-ignore` on a checkout where the fix was never made,
+// stranding the next agent behind a green suite. Hence a `.gitignore:` prefix on
+// `check-ignore -v` — every override prints a different anchor
+// (`.git/info/exclude:`, `/Users/<someone>/.gitignore:`).
 test("Sparkle's per-worktree marker is ignored by the committed .gitignore", () => {
   const output = execFileSync(
     "git", ["check-ignore", "-v", "--no-index", ".sparkle/merge-policy.json"],
