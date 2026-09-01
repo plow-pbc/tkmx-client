@@ -1,5 +1,39 @@
 # sparkle/agent-9b3c52ee-b077-45c6-8b0a-aa716928aa8f
 
+## Progress Update as of 2026-09-01 13:40 Pacific
+*(Most recent updates at top)*
+
+### Summary of changes since last update
+Applied both roborev findings on the new test (#73879 and #73880 independently flagged
+the same dead knob): removed the `-v` parsing the exit code already answers, and
+collapsed `checkIgnore()` back to its one remaining mode. Net -13 lines.
+
+### Detail of changes made:
+- `ignoredByRepoRules()`: dropped `-v` plus the stdout capture, the
+  `"<source>:<line>:<pattern>\t<path>"` format coupling, two non-null assertions and
+  the `startsWith("!")` reconstruction. `check-ignore` drops a negated match unless
+  verbose, so the plain exit status already returns the verdict the parsing rebuilt.
+  Verified against git 2.54.0 in a scratch repo before deleting anything:
+  `.env.example` exit 1, `.env.bak` exit 0, `settings.local.json` exit 0,
+  `settings.json` exit 1 — all four correct without `-v`.
+- `checkIgnore()`: the previous commit moved its only `rulesOnly: true` caller onto
+  the new helper, leaving the `--no-index` branch dead and the block comment claiming
+  "two call sites want DIFFERENT questions" that the code no longer had. Reduced to
+  `checkIgnore(relativePath)` and trimmed the comment to the index-aware half.
+- Both ignore guarantees now proven non-vacuous, individually: removing
+  `.claude/settings.local.json` fails 1 test; removing `!.env.example` fails 1 test;
+  restored, 3 pass / 0 fail. `.gitignore` restored byte-identical (`git diff --stat`
+  showed only the test file changed).
+- Suite unchanged at 277 tests / 272 pass / 5 fail — the same five pre-existing
+  host-dependent failures measured on `origin/main` (271 pass / 5 fail).
+
+### Beads activity:
+- None. Scaffolding branch; no issues opened or closed.
+
+### Potential concerns to address:
+- PR #92 remains agent-unmergeable (repo pinned merge-protected); waiting on a human.
+
+
 ## Progress Update as of 2026-09-01 13:05 Pacific
 *(Most recent updates at top)*
 
