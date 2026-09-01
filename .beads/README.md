@@ -61,7 +61,11 @@ Try Beads in your own projects:
 
 ```bash
 # Install Beads
-curl -sSL https://raw.githubusercontent.com/steveyegge/beads/main/scripts/install.sh | bash
+# Pinned to a SHA on purpose: `main` is a moving target, so piping it
+# straight to a shell runs whatever upstream pushed since you last looked.
+curl -sSLO https://raw.githubusercontent.com/steveyegge/beads/d530cddfa64b174930bddc6c5949b127a450fc13/scripts/install.sh
+# read install.sh, then:
+bash install.sh
 
 # Initialize in your repo
 bd init
