@@ -11,3 +11,15 @@ node_modules/
 .agentsview-update-check
 dist/
 *.tsbuildinfo
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
+.beads/proxieddb/
+# bd init generates these hook wrappers with the generating machine's absolute
+# home path baked in, plus a post-commit.bak-<timestamp>. They are per-machine
+# and this repo is public, so keep them local. .beads/metadata.json stays
+# TRACKED — project_id/dolt_database are shared identity needed for sync.
+.beads/hooks/
+.beads/interactions.jsonl
