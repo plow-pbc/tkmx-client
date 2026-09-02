@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -352,20 +352,28 @@ printf '%s' '{"id":"must-not-be-created"}'
 // the committed .gitignore. The check runs in a throwaway repo seeded with just
 // that file, so a local exclude cannot mask a missing rule.
 test("the parked-findings drop log is ignored by the committed .gitignore", () => {
+  // Read the path out of the script rather than restating it: a literal here
+  // would keep passing after someone renamed the script's default, at which
+  // point real parked findings become committable with the test still green.
+  const filer = fs.readFileSync(FILER, "utf8");
+  const defaulted = filer.match(/\$\{RETRO_DROP_LOG:-\$REPO\/([^}"']+)\}/);
+  assert.ok(defaulted, "could not find the drop-log default in the filer");
+  const dropLog = defaulted[1];
+
   const dir = tmp();
   fs.copyFileSync(path.join(REPO_ROOT, ".gitignore"), path.join(dir, ".gitignore"));
   execFileSync("git", ["init", "-q"], { cwd: dir });
-  fs.mkdirSync(path.join(dir, ".beads"), { recursive: true });
-  fs.writeFileSync(path.join(dir, ".beads", "retro-pain-point-drops.jsonl"), "{}\n");
 
-  let ignored = true;
-  try {
-    execFileSync("git", ["check-ignore", "-q", ".beads/retro-pain-point-drops.jsonl"], {
-      cwd: dir,
-      stdio: "ignore",
-    });
-  } catch {
-    ignored = false;
-  }
-  assert.ok(ignored, "a parked finding must never be committable in a public repo");
+  // core.excludesFile=/dev/null is the other half of the isolation: a temp repo
+  // still honours the operator's global ignore file, so a machine or CI image
+  // with `.beads/` in ~/.config/git/ignore would pass this test even with the
+  // committed rule deleted — exactly the false green the throwaway repo exists
+  // to rule out. check-ignore matches on the path string, so the file itself
+  // need not exist.
+  const { status } = spawnSync(
+    "git",
+    ["-c", "core.excludesFile=/dev/null", "check-ignore", "-q", dropLog],
+    { cwd: dir, stdio: "ignore" },
+  );
+  assert.equal(status, 0, "a parked finding must never be committable in a public repo");
 });
