@@ -11,3 +11,10 @@ node_modules/
 .agentsview-update-check
 dist/
 *.tsbuildinfo
+
+# This repo now tracks .claude/settings.json, so the sibling local override has
+# to be excluded explicitly. settings.local.json holds absolute per-machine
+# paths and a permission allowlist, and until now was kept out only by a
+# per-clone .git/info/exclude — which no other clone inherits. Same leak class
+# the .beads/ hook wrappers were removed for.
+.claude/settings.local.json
