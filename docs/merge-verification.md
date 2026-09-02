@@ -37,10 +37,13 @@ the merge happens:
 gh api repos/<owner>/<repo>/pulls/<N> -q '"\(.merged) \(.merged_at)"'
 ```
 
-Prefer the REST call above. `gh pr view --json merged` is **not** available in
-every `gh` version — where it is missing it fails with `Unknown JSON field:
-"merged"`, which is easy to misread as "not merged". `mergedAt` is accepted by
-`gh pr view` more widely:
+Prefer the REST call above. `gh pr view --json merged` does **not** work on any
+`gh` version: `merged` is a REST-only field and has never been part of the
+`PullRequest` schema `gh pr view` exposes. That schema has `mergedAt`,
+`mergedBy`, `mergeCommit`, `mergeable`, and `mergeStateStatus` — no boolean
+`merged` (verified on `gh` 2.98.0). It fails with `Unknown JSON field:
+"merged"`, which is easy to misread as "not merged". This is not a version gap,
+so upgrading `gh` will not fix it — use the REST call above, or `mergedAt`:
 
 ```bash
 gh pr view <N> --json number,state,mergedAt
