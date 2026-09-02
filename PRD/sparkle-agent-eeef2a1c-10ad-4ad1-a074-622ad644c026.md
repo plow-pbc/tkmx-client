@@ -1,3 +1,35 @@
+## Progress Update as of 2026-09-02 14:35 Pacific
+*(Most recent updates at top)*
+
+### Summary of changes since last update
+Corrected a factual error in a comment this branch wrote. The `.gitignore` block
+above the `.sparkle/*` rule called merge-policy.json "hand-written repo policy, not
+app runtime state." Roborev doubted that and the doubt was right -- the desktop app
+regenerates the file per worktree. The rule is still correct; only its stated reason
+was wrong.
+
+### Detail of changes made:
+- Rewrote the comment to say what is actually true: the app writes the file, it is
+  tracked anyway so a plain clone with no desktop app can see the repo is
+  merge-protected, and a change to the app's serialization would show every worktree
+  as modified at once (builder-index-client-kgb).
+- Re-verified the ignore mechanics in a throwaway repo, since this machine's
+  `.git/info/exclude` blanket-excludes `.sparkle/` and shadows the committed rules the
+  same way it shadows `.beads/`: merge-policy.json not ignored, other `.sparkle/`
+  content ignored. Correct in both directions.
+- Established that `main` has NO `.sparkle` ignore rule and tracks nothing under
+  `.sparkle/`, so every agent worktree cut from `main` carries a permanently untracked
+  marker. That is a problem this PR fixes and PR #69 does not, which strengthens the
+  carry-over case if #69 is the one that lands.
+- Refreshed the carry-over patch offered on #69: it predated b2470c3/c07f845 and would
+  have landed the superseded `/tmp` version of the installer snippet.
+
+### Beads activity:
+- No new beads. builder-index-client-kgb now referenced from the corrected comment.
+
+### Potential concerns to address:
+- None new.
+
 ## Progress Update as of 2026-09-02 14:15 Pacific
 *(Most recent updates at top)*
 

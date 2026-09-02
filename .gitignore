@@ -18,10 +18,15 @@ dist/
 .beads-credential-key
 .beads/proxieddb/
 
-# Sparkle agent worktree metadata (written by the desktop app, not repo content).
-# Ignore the CONTENTS, not the directory: git never descends into an excluded
-# directory, so a bare `.sparkle/` makes the negation below unreachable. That is
-# exactly how merge-policy.json -- hand-written repo policy, not app runtime
-# state -- got silently untracked one commit after it was deliberately added.
+# Sparkle agent worktree metadata, written by the desktop app rather than by
+# hand. Ignore the CONTENTS, not the directory: git never descends into an
+# excluded directory, so a bare `.sparkle/` would make the negation below
+# unreachable -- which is exactly how merge-policy.json got silently untracked
+# one commit after it was deliberately added.
+#
+# merge-policy.json is tracked anyway, so that a plain clone with no desktop app
+# can still see that this repo is merge-protected. The app does regenerate it per
+# worktree; the tracked bytes match what it emits today, but a change to that
+# serialization would show every worktree as modified at once. Tracked as a bead.
 .sparkle/*
 !.sparkle/merge-policy.json
