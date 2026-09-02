@@ -61,8 +61,11 @@ Try Beads in your own projects:
 
 ```bash
 # Install Beads
-# Installer pinned to a reviewed commit rather than a moving `main`,
-# and downloaded to a file so it can be read before it is run.
+# Installer pinned to a reviewed commit rather than a moving `main`, so
+# what runs is auditable at that SHA. `-f` makes curl fail on a 404
+# instead of handing an error page to `sh`; mktemp keeps the download
+# off a predictable path. To read it first, run the curl alone, then
+# `sh` the file it wrote.
 f=$(mktemp) && curl -fsSL https://raw.githubusercontent.com/gastownhall/beads/d530cddfa64b174930bddc6c5949b127a450fc13/scripts/install.sh -o "$f" && sh "$f"
 
 # Initialize in your repo
