@@ -1,3 +1,33 @@
+## Progress Update as of 2026-09-02 14:15 Pacific
+*(Most recent updates at top)*
+
+### Summary of changes since last update
+Roborev reviewed b2470c3 and found a hazard that commit had itself introduced:
+`installer=$(mktemp) || exit 1` is meant to be pasted into an interactive shell,
+where `exit 1` closes the operator's terminal rather than aborting an install.
+Dropped the guard and trimmed the comment it flagged as bloat.
+
+### Detail of changes made:
+- Removed `|| exit 1`. Verified the guard was unnecessary as well as harmful: with an
+  empty `$installer`, `curl -o "" URL` fails, so the `&&` chain already stops before
+  `bash` ever runs. Confirmed by executing that exact case.
+- Cut the threat-model comment from 8 lines to 4. Roborev's point was that the snippet
+  had been rewritten in three consecutive commits and each round added prose, until the
+  comment was longer than the instruction it guarded. It now states the two reasons
+  (branch-tracking URL, swappable fixed path) in one sentence.
+- Re-verified: `sh -n` on the extracted snippet passes; typecheck clean; suite 271/276
+  with the same 5 pre-existing agentsview failures.
+- This is the last iteration on this snippet. Roborev flagged the churn itself, and
+  this round removes lines and a hazard rather than adding more.
+
+### Beads activity:
+- Opened builder-index-client-kgb (tracked .sparkle/merge-policy.json is app-regenerated,
+  so a serialization change would dirty every worktree at once).
+
+### Potential concerns to address:
+- None new. The merge-policy coupling (kgb) stays latent and deliberately unfixed on
+  this branch.
+
 ## Progress Update as of 2026-09-02 13:45 Pacific
 *(Most recent updates at top)*
 

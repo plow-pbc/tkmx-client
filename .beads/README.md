@@ -60,15 +60,11 @@ Issues in Beads are:
 Try Beads in your own projects:
 
 ```bash
-# Install Beads. Fetch the installer, READ it, then run it -- piping a
+# Install Beads. Fetch to a temp file, READ it, then run it -- piping a
 # branch-tracking URL straight into a shell executes whatever upstream `main`
-# happens to hold at that moment.
-#
-# mktemp, not a fixed /tmp name: a predictable path can already exist as a
-# symlink for curl to follow, and anyone can replace the file in the gap
-# between the review and the run -- which would hand you back the very
-# "execute unreviewed bytes" problem this sequence exists to avoid.
-installer=$(mktemp) || exit 1
+# happens to hold at that moment, and a fixed /tmp name can be swapped between
+# the read and the run.
+installer=$(mktemp)
 curl -sSL -o "$installer" \
   https://raw.githubusercontent.com/steveyegge/beads/main/scripts/install.sh &&
   less "$installer" &&          # review before executing
