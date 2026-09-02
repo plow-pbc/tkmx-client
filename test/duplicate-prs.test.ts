@@ -180,16 +180,6 @@ test("a widely touched file does not hide genuine duplication underneath it", ()
   assert.deepEqual(clusters[0].sharedFiles, [".gitignore", "alpha.ts", "beta.ts"]);
 });
 
-test("two pull requests sharing one file still cluster on a small board", () => {
-  // With only a handful of pull requests open, nothing is a hub yet — the
-  // guard must not suppress real duplication on a quiet repository.
-  const clusters = clusterByFileOverlap([
-    pr(1, ["alpha.ts"]),
-    pr(2, ["alpha.ts"]),
-  ]);
-  assert.equal(clusters.length, 1);
-});
-
 // Both reviews caught this: the hub filter went blind exactly where
 // duplication is worst. With a floor of 2 and a `count > limit` test, a file
 // present in EVERY pull request was dropped as soon as three were open, so
@@ -340,3 +330,37 @@ test("a single-file pull request still clusters on its only file", () => {
   const clusters = clusterByFileOverlap([pr(1, ["alpha.ts"]), pr(2, ["alpha.ts"])]);
   assert.equal(clusters.length, 1);
 });
+
+// The comment on `requiredSharedFiles` blames this exact shape for sinking the
+// first attempt — a one-file branch touching only a common file scored 1.00
+// against everything else that touched it and became the bridge that welded
+// unrelated features together — but nothing exercised it.
+test("a single-file branch does not bridge two unrelated ones", () => {
+  const clusters = clusterByFileOverlap([
+    pr(1, ["a.ts", ".gitignore"]),
+    pr(2, [".gitignore"]),
+    pr(3, ["c.ts", ".gitignore"]),
+  ]);
+  assert.deepEqual(clusters, []);
+});
+
+// THE BOUNDARY, written down so the next change to this file finds it here
+// rather than on a live board. Every branch carrying the same two boilerplate
+// files plus one of its own gives every pair shared = 2 and overlap = 2/3, so
+// they all union and the report calls the whole board one cluster.
+//
+// This is left LOOSE deliberately, and the choice is the point: a visibly
+// over-wide cluster is self-correcting because a human reads the list and can
+// see it is wrong, whereas the silence it replaced looked exactly like a clean
+// board. Tightening it means another frequency-shaped knob, and every previous
+// turn of that knob traded one wrong answer for a quieter one. If this fires
+// on a real board, change the THRESHOLD for that run before touching the rule.
+test("shared boilerplate can pull an entire board into one cluster", () => {
+  const board = Array.from({ length: 14 }, (_unused, index) =>
+    pr(index + 1, ["AGENTS.md", "CLAUDE.md", `feature-${index}.ts`]),
+  );
+  const clusters = clusterByFileOverlap(board);
+  assert.equal(clusters.length, 1);
+  assert.equal(clusters[0].prs.length, 14);
+});
+
