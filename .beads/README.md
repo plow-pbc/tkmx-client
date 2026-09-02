@@ -63,10 +63,17 @@ Try Beads in your own projects:
 # Install Beads. Fetch the installer, READ it, then run it -- piping a
 # branch-tracking URL straight into a shell executes whatever upstream `main`
 # happens to hold at that moment.
-curl -sSL -o /tmp/beads-install.sh \
-  https://raw.githubusercontent.com/steveyegge/beads/main/scripts/install.sh
-less /tmp/beads-install.sh   # review before executing
-bash /tmp/beads-install.sh
+#
+# mktemp, not a fixed /tmp name: a predictable path can already exist as a
+# symlink for curl to follow, and anyone can replace the file in the gap
+# between the review and the run -- which would hand you back the very
+# "execute unreviewed bytes" problem this sequence exists to avoid.
+installer=$(mktemp) || exit 1
+curl -sSL -o "$installer" \
+  https://raw.githubusercontent.com/steveyegge/beads/main/scripts/install.sh &&
+  less "$installer" &&          # review before executing
+  bash "$installer"
+rm -f "$installer"
 
 # Initialize in your repo
 bd init

@@ -1,3 +1,49 @@
+## Progress Update as of 2026-09-02 13:45 Pacific
+*(Most recent updates at top)*
+
+### Summary of changes since last update
+Roborev's quota reset, so the two commits on this branch that had gone unreviewed
+for two days (5ae44f6, 75e754f) finally got a review. Three Low findings came back;
+this commit applies the one that was unambiguously right, and closes the other two
+with evidence.
+
+### Detail of changes made:
+- Applied roborev 78208 finding 1: the installer sequence in `.beads/README.md` was
+  downloading to a fixed `/tmp/beads-install.sh`. A predictable path can already
+  exist as a symlink for curl to follow, and the file can be swapped in the gap
+  between `less` and `bash` — which reinstates the "execute unreviewed bytes"
+  problem the sequence exists to prevent. Now uses `installer=$(mktemp)`, chains
+  fetch/review/run with `&&`, and cleans up.
+- Chose plain `$(mktemp)` over `mktemp -t beads-install`: GNU mktemp rejects a `-t`
+  template with no `X` placeholders, so the `-t` form works on macOS and fails on
+  Linux. Verified the final snippet with `sh -n`.
+- REJECTED roborev 78208 finding 2 (drop `post-commit.bak-*` from `.beads/.gitignore`
+  as dead). The claim was that the preceding `hooks/` rule already covers it. It does
+  not cover a bak file at `.beads/` ROOT — only inside `hooks/`. Verified by copying
+  both .gitignore files into a throwaway `git init` repo and probing, which was
+  necessary because this machine's `.git/info/exclude` blanket-excludes `.beads/` and
+  shadows the repo rules (bead builder-index-client-bsx). Keeping the rule.
+- DEFERRED roborev 78209 finding 1 (`.sparkle/merge-policy.json` may churn because the
+  desktop app regenerates it). Confirmed the premise is TRUE: 19 sibling worktrees all
+  carry the file with varying mtimes — several rewritten today — so the app does write
+  it. It is byte-identical everywhere right now, so nothing is dirty, but any change to
+  the app's serialization would dirty every worktree at once. Not changing it on this
+  branch: the tracked marker was a deliberate prior decision (a9f54e4) that this branch
+  did not author, and renaming it while a human is choosing between PR #69 and #93 would
+  be a unilateral semantic change to a Low-severity latent risk. Filed instead.
+
+### Beads activity:
+- Commented on builder-index-client-gy3 (leak scan + the verified CI guard),
+  builder-index-client-e5s (the nine-PR duplicate pile), builder-index-client-1xp
+  (corrected its "32 failing tests" figure to 5).
+- Opened a bead for the merge-policy.json churn risk (id noted in the PR comment).
+
+### Potential concerns to address:
+- The `.sparkle/merge-policy.json` coupling above is latent, not active. It only bites
+  when Sparkle changes how it serializes that file.
+- The suite still ships 5 failing agentsview tests on the default branch
+  (builder-index-client-4ed); this commit does not change that count.
+
 # sparkle/agent-eeef2a1c-10ad-4ad1-a074-622ad644c026
 
 ## Progress Update as of 2026-08-31 20:52 PDT
