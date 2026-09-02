@@ -55,14 +55,6 @@ function intersectionSize(a: Set<string>, b: Set<string>): number {
   return count;
 }
 
-function overlap(a: Set<string>, b: Set<string>): number {
-  const smaller = Math.min(a.size, b.size);
-  // A pull request that touches no files can neither duplicate nor be
-  // duplicated, and dividing by its size would be a divide-by-zero.
-  if (smaller === 0) return 0;
-  return intersectionSize(a, b) / smaller;
-}
-
 // Single-linkage grouping via union-find. Linkage must be TRANSITIVE: if A
 // overlaps B and B overlaps C, all three are one job in flight even when A and
 // C share no file. A pairwise sweep that never merges existing groups reports
@@ -148,9 +140,13 @@ export function clusterByFileOverlap(
   for (let i = 0; i < prs.length; i += 1) {
     for (let j = i + 1; j < prs.length; j += 1) {
       const shared = intersectionSize(paths[i], paths[j]);
+      // The shared-file gate runs first and is never satisfied at zero, so a
+      // branch that touches no files is rejected before the division rather
+      // than needing a guard inside it.
+      const smaller = Math.min(paths[i].size, paths[j].size);
       if (
         shared >= requiredSharedFiles(paths[i], paths[j]) &&
-        overlap(paths[i], paths[j]) >= threshold
+        shared / smaller >= threshold
       ) {
         groups.union(i, j);
       }
