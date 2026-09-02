@@ -102,60 +102,58 @@ function byAge(a: PullRequest, b: PullRequest): number {
   return ageDiff !== 0 ? ageDiff : a.number - b.number;
 }
 
-// A file that nearly every open branch touches carries no information about
-// what job a branch is doing. `.gitignore` is the worst offender here: on the
-// live board it appeared in 13 of 21 open pull requests, and because linkage is
-// transitive it welded three unrelated features onto the scaffolding cluster
-// through that one file. Such hub files are dropped before scoring.
+// One file in common is not evidence of a shared job. On the live board an
+// unrelated pull request shared exactly ONE file with the scaffolding cluster
+// (`.gitignore`) while every genuine member shared eight, and through that one
+// file transitive linkage welded three unrelated features onto the cluster.
 //
-// The bar is deliberately high — a STRICT MAJORITY of open pull requests. Set
-// lower, the rule eats the signal on a small board: with five pull requests
-// open, three of them doing the same job is the duplication being hunted, and
-// a quarter-of-the-board rule would write those three files off as hubs and
-// report nothing. The cost of the high bar is that a moderately common file (a
-// README in a third of the branches) still scores; that yields a loose
-// cluster, which is a far cheaper error than silence.
-const HUB_FILE_FRACTION = 0.5;
+// This replaced a frequency cutoff that dropped "hub" files touched by most of
+// the board. The cutoff worked on the day it was written and had a blind spot
+// that swallowed the exact incident this module exists for: ten pull requests
+// doing one job put their shared files in 10 of 14 branches, over any cutoff,
+// so every one of those paths was discarded and the group dissolved into "no
+// duplicate work found". Frequency cannot separate "many branches touch this
+// incidentally" from "many branches touch this BECAUSE they are the same job"
+// — the counts are identical — so the tool no longer asks it to.
+const MIN_SHARED_FILES = 2;
 
-// Below this many open pull requests, NOTHING is common enough to be a hub.
-// The fraction alone goes blind exactly where duplication is worst: three
-// identical pull requests put every one of their files in 100% of the board,
-// so a fraction-only rule discards all of them and reports no duplication at
-// all — from a tool built because nine of twenty-one were one job. A floor of
-// 5 also covers four duplicates among six, which a floor of 3 still swallows.
-const HUB_FILE_FLOOR = 5;
+// The requirement does NOT bend down for a small branch, and that is the whole
+// point. Measured on the live board: a one-file pull request touching only
+// `.gitignore` scored 1.00 against every branch that also touched it, and
+// because linkage is transitive that single tiny branch was the BRIDGE that
+// welded three unrelated features onto the scaffolding cluster. Letting a
+// branch qualify on its only file is what builds those bridges.
+//
+// The one safe exception is two branches with IDENTICAL file sets: nothing
+// more can be asked of them, they cannot bridge anything they are not already
+// identical to, and two branches touching exactly the same single file are
+// duplicates by definition.
+function sameFiles(a: Set<string>, b: Set<string>): boolean {
+  if (a.size !== b.size) return false;
+  for (const path of a) if (!b.has(path)) return false;
+  return true;
+}
 
-function findHubFiles(prs: PullRequest[]): Set<string> {
-  const counts = new Map<string, number>();
-  for (const pr of prs) {
-    for (const path of pathsOf(pr)) {
-      counts.set(path, (counts.get(path) ?? 0) + 1);
-    }
-  }
-
-  const limit = Math.max(HUB_FILE_FLOOR, Math.ceil(HUB_FILE_FRACTION * prs.length));
-  const hubs = new Set<string>();
-  for (const [path, count] of counts) {
-    if (count > limit) hubs.add(path);
-  }
-  return hubs;
+function requiredSharedFiles(a: Set<string>, b: Set<string>): number {
+  return sameFiles(a, b) ? 1 : MIN_SHARED_FILES;
 }
 
 export function clusterByFileOverlap(
   prs: PullRequest[],
   threshold: number = DEFAULT_OVERLAP_THRESHOLD,
 ): Cluster[] {
-  const hubs = findHubFiles(prs);
-  const paths = prs.map((pr) => {
-    const kept = new Set<string>();
-    for (const path of pathsOf(pr)) if (!hubs.has(path)) kept.add(path);
-    return kept;
-  });
+  const paths = prs.map(pathsOf);
   const groups = new DisjointSet(prs.length);
 
   for (let i = 0; i < prs.length; i += 1) {
     for (let j = i + 1; j < prs.length; j += 1) {
-      if (overlap(paths[i], paths[j]) >= threshold) groups.union(i, j);
+      const shared = intersectionSize(paths[i], paths[j]);
+      if (
+        shared >= requiredSharedFiles(paths[i], paths[j]) &&
+        overlap(paths[i], paths[j]) >= threshold
+      ) {
+        groups.union(i, j);
+      }
     }
   }
 

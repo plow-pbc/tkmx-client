@@ -118,7 +118,12 @@ test("within a cluster the oldest pull request comes first", () => {
 });
 
 test("the threshold is configurable", () => {
-  const prs = [pr(1, ["a.ts", "b.ts", "c.ts"]), pr(2, ["a.ts", "z.ts", "y.ts"])];
+  // Two files in common, so the shared-file requirement is satisfied and the
+  // threshold is the only thing deciding: 2 of 4 is 0.5.
+  const prs = [
+    pr(1, ["a.ts", "b.ts", "c.ts", "d.ts"]),
+    pr(2, ["a.ts", "b.ts", "x.ts", "y.ts", "z.ts", "w.ts"]),
+  ];
   assert.deepEqual(clusterByFileOverlap(prs, 0.6), []);
   assert.equal(clusterByFileOverlap(prs, 0.3).length, 1);
 });
@@ -141,10 +146,9 @@ test("a clean slate reports no duplication rather than an empty list", () => {
 });
 
 // Live run caught this: `.gitignore` was touched by 13 of 21 open pull
-// requests, so it acted as a hub and transitively welded three unrelated
-// features (Ask-a-Builder, a worktree-marker fix, a bead filer) onto the beads
-// scaffolding cluster. A file that nearly every branch touches says nothing
-// about what job a branch is doing, so it must not score.
+// requests and, because linkage is transitive, welded three unrelated features
+// (Ask-a-Builder, a worktree-marker fix, a bead filer) onto the beads
+// scaffolding cluster. One file in common is not evidence of a shared job.
 test("a file touched by most pull requests does not link them", () => {
   const others = Array.from({ length: 8 }, (_unused, index) =>
     pr(100 + index, [".gitignore", `unrelated-${index}.ts`]),
@@ -157,7 +161,7 @@ test("a file touched by most pull requests does not link them", () => {
   assert.deepEqual(clusters, []);
 });
 
-test("a hub file does not hide genuine duplication underneath it", () => {
+test("a widely touched file does not hide genuine duplication underneath it", () => {
   const others = Array.from({ length: 8 }, (_unused, index) =>
     pr(100 + index, [".gitignore", `unrelated-${index}.ts`]),
   );
@@ -171,9 +175,9 @@ test("a hub file does not hide genuine duplication underneath it", () => {
     clusters[0].prs.map((p) => p.number),
     [1, 2],
   );
-  // The hub file is excluded from scoring, so it is not evidence and must not
-  // be reported as the thing these two share.
-  assert.deepEqual(clusters[0].sharedFiles, ["alpha.ts", "beta.ts"]);
+  // Every shared file is reported, the common one included — these two really
+  // do both touch it. It simply was not enough on its own to link them.
+  assert.deepEqual(clusters[0].sharedFiles, [".gitignore", "alpha.ts", "beta.ts"]);
 });
 
 test("two pull requests sharing one file still cluster on a small board", () => {
@@ -191,7 +195,7 @@ test("two pull requests sharing one file still cluster on a small board", () => 
 // present in EVERY pull request was dropped as soon as three were open, so
 // three identical pull requests reported as no duplication at all — from a
 // tool built because nine of twenty-one were one job.
-test("three identical pull requests are not written off as hub files", () => {
+test("three identical pull requests are found", () => {
   const clusters = clusterByFileOverlap([
     pr(1, ["alpha.ts", "beta.ts"]),
     pr(2, ["alpha.ts", "beta.ts"]),
@@ -286,4 +290,53 @@ test("an unknown flag is rejected rather than ignored", () => {
 
 test("a bare positional argument is rejected", () => {
   assert.throws(() => parseCliOptions(["40"]), /40/);
+});
+
+// THE INCIDENT THIS MODULE EXISTS FOR, and the hub-file rule went silent on it.
+// Ten pull requests doing the beads scaffolding on a fourteen-pull-request
+// board: every one of their shared files was present in 10 of 14, over any
+// frequency cutoff, so all of those paths were discarded and the group
+// dissolved into nothing. It survived on the live 21-PR board only by luck of
+// where the cutoff landed. Frequency cannot tell "many branches touch this
+// incidentally" from "many branches touch this BECAUSE they are the same job",
+// so the tool no longer tries.
+test("ten duplicates among fourteen pull requests are found", () => {
+  const scaffolding = [
+    "AGENTS.md",
+    "CLAUDE.md",
+    ".beads/metadata.json",
+    ".beads/.gitignore",
+    ".codex/config.toml",
+  ];
+  const board = [
+    ...Array.from({ length: 10 }, (_unused, index) =>
+      pr(index + 1, scaffolding),
+    ),
+    ...Array.from({ length: 4 }, (_unused, index) =>
+      pr(100 + index, [`unrelated-${index}.ts`]),
+    ),
+  ];
+  const clusters = clusterByFileOverlap(board);
+  assert.equal(clusters.length, 1);
+  assert.equal(clusters[0].prs.length, 10);
+});
+
+// What actually separated the false links from the real ones on the live
+// board: an unrelated pull request shared exactly ONE file with the
+// scaffolding cluster (`.gitignore`), while every genuine member shared eight.
+// Requiring more than a single file in common is what the frequency cutoff was
+// reaching for, without a cutoff's blind spot.
+test("one file in common is not enough to link two multi-file pull requests", () => {
+  const clusters = clusterByFileOverlap([
+    pr(1, [".gitignore", "feature.ts"]),
+    pr(2, [".gitignore", "unrelated.ts"]),
+  ]);
+  assert.deepEqual(clusters, []);
+});
+
+test("a single-file pull request still clusters on its only file", () => {
+  // Nothing more can be asked of a branch that touches one file, and two
+  // branches touching the same single file is duplication by definition.
+  const clusters = clusterByFileOverlap([pr(1, ["alpha.ts"]), pr(2, ["alpha.ts"])]);
+  assert.equal(clusters.length, 1);
 });
