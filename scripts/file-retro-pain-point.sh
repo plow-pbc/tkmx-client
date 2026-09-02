@@ -89,7 +89,10 @@ while [[ $# -gt 0 ]]; do
     --subsystem)      SUBSYSTEM="${2:-}";      shift "$(( $# > 1 ? 2 : 1 ))" ;;
     --context)        CONTEXT="${2:-}";        shift "$(( $# > 1 ? 2 : 1 ))" ;;
     --json-stdin)     JSON_STDIN=1; shift ;;
-    -h|--help)        sed -n '2,40p' "$0"; exit 0 ;;
+    # The whole header block, however long it grows. A hardcoded line range
+    # silently truncates --help every time someone adds to the contract above,
+    # which is exactly backwards: documenting more should not show less.
+    -h|--help)        awk 'NR>1 && /^#/; NR>1 && !/^#/{exit}' "$0"; exit 0 ;;
     *)                emit "unfiled:bad-args" ;;
   esac
 done

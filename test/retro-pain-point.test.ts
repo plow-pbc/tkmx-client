@@ -331,6 +331,29 @@ test("a dangling optional flag still files the finding", () => {
   }
 });
 
+// --help prints the header, which IS the caller-facing contract. It used to be
+// a hardcoded line range, so every addition to that contract pushed the tail of
+// it out of the help output — documenting more showed less, silently. These
+// assertions are on the last things in the header for that reason: they are
+// what a fixed range drops first.
+test("--help prints the whole contract, including the end of it", () => {
+  const { line, status } = runFiler(["--help"], {});
+  assert.equal(status, 0);
+  for (const needle of [
+    "--severity 1-4",
+    "--json-stdin",
+    "Env overrides",
+    "BD_BIN",
+    "RETRO_DROP_LOG",
+    "unfiled:<reason>",
+    "bad-args",
+  ]) {
+    assert.ok(line.includes(needle), `--help output is missing ${needle}`);
+  }
+  // Stops at the header: the code below it must not be dumped at the caller.
+  assert.ok(!line.includes("set -uo pipefail"), "--help spilled past the header");
+});
+
 // Severity 4 is a full blocker and 1 is a paper cut, while bd's priority runs
 // the other way (0 critical .. 4 backlog). Getting this inverted would file
 // every blocker into the backlog.
