@@ -54,9 +54,10 @@ function checkIgnore(relativePath: string): boolean {
     return true;
   } catch (err) {
     // Exit 1 is the real answer "not ignored". Anything else is git failing
-    // (128 when there's no work tree, for instance), and swallowing that would
-    // make the NEGATIVE assertions below pass vacuously — they cannot otherwise
-    // tell "the rules re-admit this file" from "git never ran".
+    // (128 when there's no work tree, for instance) and must surface as itself:
+    // reported as "not ignored" it would fail the caller's assertion with the
+    // wrong story — "this file must be git-ignored" when what actually happened
+    // is that git never ran.
     if ((err as { status?: number }).status !== 1) throw err;
     return false;
   }
@@ -103,6 +104,10 @@ function ignoredByRepoRules(relativePath: string): boolean {
       );
       return true;
     } catch (err) {
+      // Same rethrow, load-bearing for a different reason: this helper carries
+      // the NEGATIVE assertion, and "not ignored" is its passing answer. A git
+      // failure swallowed here would pass vacuously, unable to tell "the rules
+      // re-admit this file" from "git never ran".
       if ((err as { status?: number }).status !== 1) throw err;
       return false;
     }
