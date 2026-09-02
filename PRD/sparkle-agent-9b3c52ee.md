@@ -1,5 +1,31 @@
 # sparkle/agent-9b3c52ee-b077-45c6-8b0a-aa716928aa8f
 
+## Progress Update as of 2026-09-01 13:55 Pacific
+*(Most recent updates at top)*
+
+### Summary of changes since last update
+Comment-only follow-up. Both roborev passes on `af2ad4c` (#73930, #73934) flagged the
+same stale justification: `checkIgnore`'s rethrow comment still explained itself by
+"the NEGATIVE assertions below", but after the prior commit its only caller is the
+POSITIVE loop — the negative assertions moved to `ignoredByRepoRules`.
+
+### Detail of changes made:
+- `checkIgnore`: retargeted the rethrow comment at the risk that actually applies to
+  it — a 128 reported as "not ignored" fails the caller's assertion with the wrong
+  story ("must be git-ignored") instead of surfacing that git never ran.
+- `ignoredByRepoRules`: its exit-1 branch had an uncommented copy of the same
+  rethrow, and that one IS the vacuum guard, because "not ignored" is the passing
+  answer for the negative assertion. Said so there.
+- No behavior change; 3 pass / 0 fail.
+
+### Beads activity:
+- None.
+
+### Potential concerns to address:
+- Three review rounds on this branch have now produced only comment-accuracy
+  findings. The code is settled; the remaining blocker is human merge of PR #92.
+
+
 ## Progress Update as of 2026-09-01 13:40 Pacific
 *(Most recent updates at top)*
 
