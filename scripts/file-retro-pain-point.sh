@@ -63,13 +63,22 @@ emit() {
   exit 0
 }
 
+# Every value-taking flag checks that its value is actually there before
+# consuming it. `shift 2` with a lone trailing flag is a no-op that returns
+# non-zero, and since this script deliberately runs without `set -e` that
+# failure is swallowed — leaving the loop re-reading the same argument forever
+# and breaking BOTH halves of the contract at once: nothing on stdout and no
+# exit. A caller writing `--context $CTX` with an empty CTX produces exactly
+# that argv, so this is ordinary input, not a malformed edge case.
+value_or_bail() { [[ $# -ge 2 ]] || emit "unfiled:bad-args"; }
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --summary)        SUMMARY="${2:-}"; shift 2 ;;
-    --severity)       SEVERITY="${2:-}"; shift 2 ;;
-    --recommendation) RECOMMENDATION="${2:-}"; shift 2 ;;
-    --subsystem)      SUBSYSTEM="${2:-}"; shift 2 ;;
-    --context)        CONTEXT="${2:-}"; shift 2 ;;
+    --summary)        value_or_bail "$@"; SUMMARY="$2"; shift 2 ;;
+    --severity)       value_or_bail "$@"; SEVERITY="$2"; shift 2 ;;
+    --recommendation) value_or_bail "$@"; RECOMMENDATION="$2"; shift 2 ;;
+    --subsystem)      value_or_bail "$@"; SUBSYSTEM="$2"; shift 2 ;;
+    --context)        value_or_bail "$@"; CONTEXT="$2"; shift 2 ;;
     --json-stdin)     JSON_STDIN=1; shift ;;
     -h|--help)        sed -n '2,40p' "$0"; exit 0 ;;
     *)                emit "unfiled:bad-args" ;;
@@ -172,11 +181,16 @@ parse_id() {
   ' 2>/dev/null
 }
 
-find_existing() {
-  "$BD_BIN" list --all --label "$FBKEY" --json --no-pager --limit 0 2>/dev/null | parse_id
+# One spelling of the query, used by both the pre-create lookup and the
+# post-create re-check, so a flag added to one cannot silently diverge from the
+# other. stderr is left alone on purpose: it is now the only place an operator
+# can learn WHY a store came back unreadable, and stdout — the one channel the
+# single-line contract owns — is unaffected by it.
+list_raw() {
+  "$BD_BIN" list --all --label "$FBKEY" --json --no-pager --limit 0
 }
 
-LIST_OUT="$("$BD_BIN" list --all --label "$FBKEY" --json --no-pager --limit 0 2>/dev/null)"
+LIST_OUT="$(list_raw)"
 LIST_RC=$?
 
 # The exit status alone decides this, deliberately — NOT "failed AND printed
@@ -191,8 +205,8 @@ if [[ $LIST_RC -ne 0 ]]; then
 fi
 
 # Reuse the lookup we already paid for rather than asking bd the same question
-# twice; find_existing stays for the post-create re-check, where a fresh read is
-# the entire point.
+# twice; the post-create re-check below does read again, which is the point
+# there.
 EXISTING="$(printf '%s' "$LIST_OUT" | parse_id)"
 
 if [[ -n "$EXISTING" ]]; then
@@ -254,7 +268,7 @@ NEW_ID="$("$BD_BIN" create --title "$SUMMARY" --description "$DESC" --type=task 
 # The create returned nothing usable. It may still have landed, so look the key
 # up before deciding anything — writing a second bead here is the exact failure
 # this script exists to prevent.
-EXISTING="$(find_existing)"
+EXISTING="$(list_raw | parse_id)"
 [[ -n "$EXISTING" ]] && emit "$EXISTING"
 
 park "parked-create" && emit "unfiled:parked-create"

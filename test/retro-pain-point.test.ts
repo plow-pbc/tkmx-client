@@ -64,6 +64,10 @@ node -e '
   return bd;
 }
 
+// Distinct from any status the filer itself can return, so a hang cannot be
+// mistaken for an ordinary non-zero exit.
+const TIMED_OUT = -1;
+
 function runFiler(
   args: string[],
   env: NodeJS.ProcessEnv,
@@ -72,13 +76,20 @@ function runFiler(
   let status = 0;
   let out = "";
   try {
+    // The timeout is part of the assertion, not defensive padding: the filer
+    // promises to always terminate with one line, so a run that has to be
+    // killed is a failure of that contract. Without it a non-terminating
+    // filer hangs the whole suite instead of failing one test, which is how
+    // the trailing-flag spin below stayed invisible.
     out = execFileSync("bash", [FILER, ...args], {
       env: { ...process.env, ...env },
       input: input ?? "",
       encoding: "utf8",
+      timeout: 15_000,
+      killSignal: "SIGKILL",
     });
   } catch (err: any) {
-    status = err.status ?? 1;
+    status = err.status ?? (err.signal ? TIMED_OUT : 1);
     out = err.stdout ?? "";
   }
   return { line: out.trim(), status };
@@ -280,8 +291,18 @@ test("bad input is reported, never guessed", () => {
     ["--summary", "x", "--recommendation", "y"],
     ["--severity", "2", "--recommendation", "y"],
     ["--summary", "x", "--severity", "2"],
+    // A trailing value-taking flag. `shift 2` with only one argument left
+    // leaves the positionals untouched and returns non-zero, and with no
+    // `set -e` that failure is swallowed — so the loop re-reads the same
+    // argument forever. Agent-generated command lines produce exactly this
+    // argv whenever an interpolated value is empty (`--context $CTX`) or the
+    // line is truncated, so the contract has to hold here too.
+    ["--summary", "x", "--severity", "2", "--recommendation", "y", "--context"],
+    ["--summary", "x", "--severity", "2", "--recommendation", "y", "--subsystem"],
+    ["--summary"],
   ]) {
     const { line, status } = runFiler(args, env);
+    assert.notEqual(status, TIMED_OUT, `the filer never terminated for: ${args.join(" ")}`);
     assert.equal(status, 0);
     assert.equal(line, "unfiled:bad-args");
   }
