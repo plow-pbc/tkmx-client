@@ -30,6 +30,9 @@
 #     unconfirmed      a create was issued but could not be confirmed
 #   REWRITE:
 #     scrubbed         the text carries PII or a secret; anonymize and retry
+#     bad-args         the invocation was malformed (missing summary or
+#                      recommendation, or a severity outside 1-4); nothing was
+#                      filed and nothing was parked, so fix the call and re-run
 #
 # Usage:
 #   file-retro-pain-point.sh --summary '...' --severity 1-4 --recommendation '...'
@@ -63,22 +66,28 @@ emit() {
   exit 0
 }
 
-# Every value-taking flag checks that its value is actually there before
-# consuming it. `shift 2` with a lone trailing flag is a no-op that returns
-# non-zero, and since this script deliberately runs without `set -e` that
-# failure is swallowed — leaving the loop re-reading the same argument forever
-# and breaking BOTH halves of the contract at once: nothing on stdout and no
-# exit. A caller writing `--context $CTX` with an empty CTX produces exactly
-# that argv, so this is ordinary input, not a malformed edge case.
-value_or_bail() { [[ $# -ge 2 ]] || emit "unfiled:bad-args"; }
-
+# Shift what is actually there, never a fixed 2. `shift 2` with a lone trailing
+# flag is a no-op that returns non-zero, and since this script deliberately runs
+# without `set -e` that failure is swallowed — leaving the loop re-reading the
+# same argument forever and breaking BOTH halves of the contract at once:
+# nothing on stdout and no exit.
+#
+# Bailing out on a dangling flag would close the spin but trade it for a quieter
+# loss. `--context $CTX` with an empty CTX produces exactly that argv, and that
+# invocation carries a COMPLETE finding — summary, severity and recommendation
+# all present, only an optional flag left hanging. Refusing it discards the
+# finding outright: the refusal happens before the dedupe key exists, so nothing
+# parks and nothing re-files it. So a dangling optional flag files the bead with
+# an empty value, exactly as `${2:-}` always intended. A dangling REQUIRED flag
+# still fails loudly, via the emptiness checks further down — the loud failure is
+# kept where it changes what gets filed.
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --summary)        value_or_bail "$@"; SUMMARY="$2"; shift 2 ;;
-    --severity)       value_or_bail "$@"; SEVERITY="$2"; shift 2 ;;
-    --recommendation) value_or_bail "$@"; RECOMMENDATION="$2"; shift 2 ;;
-    --subsystem)      value_or_bail "$@"; SUBSYSTEM="$2"; shift 2 ;;
-    --context)        value_or_bail "$@"; CONTEXT="$2"; shift 2 ;;
+    --summary)        SUMMARY="${2:-}";        shift "$(( $# > 1 ? 2 : 1 ))" ;;
+    --severity)       SEVERITY="${2:-}";       shift "$(( $# > 1 ? 2 : 1 ))" ;;
+    --recommendation) RECOMMENDATION="${2:-}"; shift "$(( $# > 1 ? 2 : 1 ))" ;;
+    --subsystem)      SUBSYSTEM="${2:-}";      shift "$(( $# > 1 ? 2 : 1 ))" ;;
+    --context)        CONTEXT="${2:-}";        shift "$(( $# > 1 ? 2 : 1 ))" ;;
     --json-stdin)     JSON_STDIN=1; shift ;;
     -h|--help)        sed -n '2,40p' "$0"; exit 0 ;;
     *)                emit "unfiled:bad-args" ;;
@@ -251,8 +260,13 @@ Filed by scripts/file-retro-pain-point.sh from an agent retro. Dedupe key: $FBKE
 LABELS="retro-pain-point,$FBKEY,seen-1"
 [[ -n "$SUBSYSTEM" ]] && LABELS="$LABELS,subsystem-$(printf '%s' "$SUBSYSTEM" | tr '[:upper:] ' '[:lower:]-' | tr -cd 'a-z0-9-')"
 
+# bd's own stderr is left alone here for the same reason as the lookup above:
+# when the create fails, the operator gets `unfiled:parked-create` and a drop-log
+# row with a reason, and nothing at all saying why bd refused the write. Only
+# stdout is captured into NEW_ID, so the one-line contract is unaffected. The
+# node parser stays quiet — its noise would be about this script, not about bd.
 NEW_ID="$("$BD_BIN" create --title "$SUMMARY" --description "$DESC" --type=task \
-  --priority="$PRIORITY" -l "$LABELS" --json 2>/dev/null \
+  --priority="$PRIORITY" -l "$LABELS" --json \
   | node -e '
     let s = ""; process.stdin.on("data", d => s += d).on("end", () => {
       try {

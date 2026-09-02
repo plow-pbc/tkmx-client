@@ -291,20 +291,43 @@ test("bad input is reported, never guessed", () => {
     ["--summary", "x", "--recommendation", "y"],
     ["--severity", "2", "--recommendation", "y"],
     ["--summary", "x", "--severity", "2"],
-    // A trailing value-taking flag. `shift 2` with only one argument left
-    // leaves the positionals untouched and returns non-zero, and with no
-    // `set -e` that failure is swallowed — so the loop re-reads the same
-    // argument forever. Agent-generated command lines produce exactly this
-    // argv whenever an interpolated value is empty (`--context $CTX`) or the
-    // line is truncated, so the contract has to hold here too.
-    ["--summary", "x", "--severity", "2", "--recommendation", "y", "--context"],
-    ["--summary", "x", "--severity", "2", "--recommendation", "y", "--subsystem"],
+    // A trailing REQUIRED flag: the value that decides what gets filed is
+    // missing, so this must fail loudly rather than file a bead with an empty
+    // title. It is also the shape that used to spin the parse loop forever —
+    // `shift 2` with one argument left is a no-op returning non-zero, and with
+    // no `set -e` that failure was swallowed.
     ["--summary"],
+    ["--summary", "x", "--recommendation", "y", "--severity"],
+    ["--summary", "x", "--severity", "2", "--recommendation"],
   ]) {
     const { line, status } = runFiler(args, env);
     assert.notEqual(status, TIMED_OUT, `the filer never terminated for: ${args.join(" ")}`);
     assert.equal(status, 0);
     assert.equal(line, "unfiled:bad-args");
+  }
+});
+
+// The counterpart to the bad-input cases above. `--context $CTX` with an empty
+// CTX is ordinary agent-written shell, and the finding it carries is COMPLETE —
+// summary, severity and recommendation all present, only an optional flag left
+// dangling. Refusing it would discard that finding outright: the refusal lands
+// before the dedupe key exists, so nothing parks and nothing re-files it. A
+// dangling optional flag therefore files the bead with an empty value.
+test("a dangling optional flag still files the finding", () => {
+  for (const args of [
+    ["--summary", "x", "--severity", "2", "--recommendation", "y", "--context"],
+    ["--summary", "x", "--severity", "2", "--recommendation", "y", "--subsystem"],
+  ]) {
+    const dir = tmp();
+    const bd = makeFakeBd(dir);
+    const { line, status } = runFiler(args, {
+      BD_BIN: bd,
+      PATH: `${dir}:${process.env.PATH}`,
+      RETRO_DROP_LOG: path.join(dir, "drops.jsonl"),
+    });
+    assert.notEqual(status, TIMED_OUT, `the filer never terminated for: ${args.join(" ")}`);
+    assert.equal(status, 0);
+    assert.equal(line, "fake-bead-1", `a complete finding was discarded by: ${args.join(" ")}`);
   }
 });
 
