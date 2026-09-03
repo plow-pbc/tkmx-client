@@ -463,3 +463,9 @@ journalctl --user -u token-tracking-reporter
 ```
 npm run report
 ```
+
+## License
+
+Apache-2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE). Copyright 2025 The Plow Collective, Inc.
+
+"Plow" and the Plow logo are trademarks of The Plow Collective, Inc. The license grants no trademark rights.
