@@ -38,12 +38,19 @@ gh api repos/<owner>/<repo>/pulls/<N> -q '"\(.merged) \(.merged_at)"'
 ```
 
 Prefer the REST call above. `gh pr view --json merged` does **not** work on any
-`gh` version: `merged` is a REST-only field and has never been part of the
-`PullRequest` schema `gh pr view` exposes. That schema has `mergedAt`,
-`mergedBy`, `mergeCommit`, `mergeable`, and `mergeStateStatus` — no boolean
-`merged` (verified on `gh` 2.98.0). It fails with `Unknown JSON field:
-"merged"`, which is easy to misread as "not merged". This is not a version gap,
-so upgrading `gh` will not fix it — use the REST call above, or `mergedAt`:
+`gh` version, and the reason is narrow: `merged` is missing from the field set
+that *this command* accepts. `gh pr view --json` only takes fields present in
+`gh`'s own `PullRequest` struct, which carries `mergedAt`, `mergedBy`,
+`mergeCommit`, `mergeable`, and `mergeStateStatus` but no boolean `merged`
+(verified on `gh` 2.98.0). The field is not REST-only — GitHub's GraphQL
+`PullRequest` exposes `merged` too, so `gh api graphql` can read it:
+
+```bash
+gh api graphql -f query='query{repository(owner:"O",name:"R"){pullRequest(number:N){merged}}}'
+```
+
+It is a permanent gap in one command, not a version gap, so upgrading `gh`
+will not fix it. Use the REST call above, or `mergedAt` via `gh pr view`:
 
 ```bash
 gh pr view <N> --json number,state,mergedAt
