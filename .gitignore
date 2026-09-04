@@ -11,3 +11,15 @@ node_modules/
 .agentsview-update-check
 dist/
 *.tsbuildinfo
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
+.beads/proxieddb/
+# bd init generates .beads/hooks/* wrappers that hardcode the generating
+# machine's absolute home path, plus a local-only interactions.jsonl. They are
+# also listed in .beads/.gitignore, but bd owns that file and regenerates it —
+# these copies live where bd will not overwrite them.
+.beads/hooks/
+.beads/interactions.jsonl
