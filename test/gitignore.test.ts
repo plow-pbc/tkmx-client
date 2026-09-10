@@ -2,6 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import * as path from "node:path";
+import * as fs from "node:fs";
+import * as os from "node:os";
 
 const REPO_ROOT = path.join(__dirname, "..", "..");
 
@@ -75,4 +77,79 @@ test(".env.example stays committable despite the broad .env* rule", () => {
       `${candidate} must NOT be excluded by the ignore rules — the .env* rule needs its "!" negation intact`,
     );
   }
+});
+
+// The `.sparkle/` rule has to do two opposite things at once: exclude the
+// per-worktree state the desktop app writes, while keeping the one tracked
+// marker committable. Spelling it `.sparkle/` instead of `.sparkle/*` breaks
+// the second half INVISIBLY — git never descends into an excluded directory,
+// so the `!` negation below it is unreachable and the marker silently drops
+// out of the repo. That happened here once, one commit after the marker was
+// deliberately added.
+//
+// These assertions deliberately do NOT run `git check-ignore` in this repo.
+// A developer's `.git/info/exclude` is machine-local, is shared across every
+// worktree via the common dir, and OVERRIDES the committed rules — this repo's
+// own agent tooling writes a blanket `.sparkle/` line into it. An in-repo probe
+// therefore reports whatever that local file says and passes in CI while
+// failing on the machine of the person who has to fix it.
+//
+// So: evaluate the COMMITTED .gitignore, and only that, in a throwaway repo
+// that has no index and no info/exclude. Same question, host-independent answer.
+function ignoredByCommittedRules(candidates: string[]): Map<string, boolean> {
+  const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), "gitignore-rules-"));
+  try {
+    execFileSync("git", ["init", "-q", sandbox], { stdio: "ignore" });
+    fs.copyFileSync(path.join(REPO_ROOT, ".gitignore"), path.join(sandbox, ".gitignore"));
+
+    const answers = new Map<string, boolean>();
+    for (const candidate of candidates) {
+      // check-ignore needs the path to be plausible, not to exist, but a
+      // directory component must not be mistaken for a file.
+      fs.mkdirSync(path.join(sandbox, path.dirname(candidate)), { recursive: true });
+      fs.writeFileSync(path.join(sandbox, candidate), "");
+      try {
+        execFileSync("git", ["check-ignore", "--quiet", "--no-index", candidate], {
+          cwd: sandbox,
+          stdio: "ignore",
+        });
+        answers.set(candidate, true);
+      } catch (err) {
+        // Exit 1 means "not ignored". Anything else is git failing, and
+        // swallowing it would make these assertions pass vacuously.
+        if ((err as { status?: number }).status !== 1) throw err;
+        answers.set(candidate, false);
+      }
+    }
+    return answers;
+  } finally {
+    fs.rmSync(sandbox, { recursive: true, force: true });
+  }
+}
+
+test("the committed .sparkle rules ignore app state but keep the marker", () => {
+  const answers = ignoredByCommittedRules([
+    ".sparkle/session-state.json",
+    ".sparkle/whatever.log",
+    ".sparkle/nested/thing.json",
+    ".sparkle/merge-policy.json",
+  ]);
+
+  for (const appState of [
+    ".sparkle/session-state.json",
+    ".sparkle/whatever.log",
+    ".sparkle/nested/thing.json",
+  ]) {
+    assert.ok(
+      answers.get(appState),
+      `${appState} must be ignored — it is per-worktree app state, not repo content`,
+    );
+  }
+
+  assert.equal(
+    answers.get(".sparkle/merge-policy.json"),
+    false,
+    ".sparkle/merge-policy.json must NOT be excluded — a bare `.sparkle/` rule would " +
+      "make its negation unreachable and silently untrack the marker",
+  );
 });

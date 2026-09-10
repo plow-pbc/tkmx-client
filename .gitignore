@@ -11,3 +11,15 @@ node_modules/
 .agentsview-update-check
 dist/
 *.tsbuildinfo
+
+# Sparkle agent worktree metadata, written by the desktop app rather than by
+# hand. Ignore the CONTENTS, not the directory: git never descends into an
+# excluded directory, so a bare `.sparkle/` would make the negation below
+# unreachable, silently untracking the marker it is meant to keep.
+#
+# merge-policy.json is tracked anyway, so that a plain clone with no desktop app
+# can still see that this repo is merge-protected. The app does regenerate it per
+# worktree; the tracked bytes match what it emits today, but a change to that
+# serialization would show every worktree as modified at once.
+.sparkle/*
+!.sparkle/merge-policy.json
