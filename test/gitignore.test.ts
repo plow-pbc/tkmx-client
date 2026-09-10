@@ -43,13 +43,19 @@ const MUST_NOT_BE_IGNORED = [".env.example"];
 //   rules-only (--no-index) — "do the ignore rules exclude this?" Needed for a
 //     file that is already tracked, where the index-aware answer is a foregone
 //     "not ignored" and would make the assertion vacuous.
-function checkIgnore(relativePath: string, opts: { rulesOnly: boolean }): boolean {
-  const args = ["check-ignore", "--quiet"];
+function checkIgnore(
+  relativePath: string,
+  opts: { rulesOnly: boolean; cwd?: string; isolated?: boolean },
+): boolean {
+  // `isolated` cuts the two host-level sources check-ignore would otherwise
+  // read: the user's core.excludesFile (falling back to ~/.config/git/ignore).
+  const args = opts.isolated ? ["-c", "core.excludesFile=/dev/null"] : [];
+  args.push("check-ignore", "--quiet");
   if (opts.rulesOnly) args.push("--no-index");
   args.push(relativePath);
 
   try {
-    execFileSync("git", args, { cwd: REPO_ROOT, stdio: "ignore" });
+    execFileSync("git", args, { cwd: opts.cwd ?? REPO_ROOT, stdio: "ignore" });
     return true;
   } catch (err) {
     // Exit 1 is the real answer "not ignored". Anything else is git failing
@@ -95,11 +101,13 @@ test(".env.example stays committable despite the broad .env* rule", () => {
 // failing on the machine of the person who has to fix it.
 //
 // So: evaluate the COMMITTED .gitignore, and only that, in a throwaway repo
-// that has no index and no info/exclude. Same question, host-independent answer.
+// that has no index, no info/exclude, no init template and no global excludes
+// file. Same question, genuinely host-independent answer.
 function ignoredByCommittedRules(candidates: string[]): Map<string, boolean> {
   const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), "gitignore-rules-"));
   try {
-    execFileSync("git", ["init", "-q", sandbox], { stdio: "ignore" });
+    // --template= stops git copying an info/exclude in from init.templateDir.
+    execFileSync("git", ["init", "-q", "--template=", sandbox], { stdio: "ignore" });
     fs.copyFileSync(path.join(REPO_ROOT, ".gitignore"), path.join(sandbox, ".gitignore"));
 
     const answers = new Map<string, boolean>();
@@ -108,18 +116,10 @@ function ignoredByCommittedRules(candidates: string[]): Map<string, boolean> {
       // directory component must not be mistaken for a file.
       fs.mkdirSync(path.join(sandbox, path.dirname(candidate)), { recursive: true });
       fs.writeFileSync(path.join(sandbox, candidate), "");
-      try {
-        execFileSync("git", ["check-ignore", "--quiet", "--no-index", candidate], {
-          cwd: sandbox,
-          stdio: "ignore",
-        });
-        answers.set(candidate, true);
-      } catch (err) {
-        // Exit 1 means "not ignored". Anything else is git failing, and
-        // swallowing it would make these assertions pass vacuously.
-        if ((err as { status?: number }).status !== 1) throw err;
-        answers.set(candidate, false);
-      }
+      answers.set(
+        candidate,
+        checkIgnore(candidate, { rulesOnly: true, cwd: sandbox, isolated: true }),
+      );
     }
     return answers;
   } finally {
@@ -127,19 +127,19 @@ function ignoredByCommittedRules(candidates: string[]): Map<string, boolean> {
   }
 }
 
+const SPARKLE_APP_STATE = [
+  ".sparkle/session-state.json",
+  ".sparkle/whatever.log",
+  ".sparkle/nested/thing.json",
+];
+
 test("the committed .sparkle rules ignore app state but keep the marker", () => {
   const answers = ignoredByCommittedRules([
-    ".sparkle/session-state.json",
-    ".sparkle/whatever.log",
-    ".sparkle/nested/thing.json",
+    ...SPARKLE_APP_STATE,
     ".sparkle/merge-policy.json",
   ]);
 
-  for (const appState of [
-    ".sparkle/session-state.json",
-    ".sparkle/whatever.log",
-    ".sparkle/nested/thing.json",
-  ]) {
+  for (const appState of SPARKLE_APP_STATE) {
     assert.ok(
       answers.get(appState),
       `${appState} must be ignored — it is per-worktree app state, not repo content`,

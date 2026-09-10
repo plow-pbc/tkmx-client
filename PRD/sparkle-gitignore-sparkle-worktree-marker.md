@@ -1,3 +1,36 @@
+## Progress Update as of 2026-09-10 (later) Pacific
+*(Most recent updates at top)*
+
+### Summary of changes since last update
+Roborev (job 82755) found that the "host-independent" sandbox was not actually isolated.
+It skipped the index and the repo's info/exclude, but still read the user's
+core.excludesFile (falling back to ~/.config/git/ignore) and any init.templateDir. A
+machine with `.sparkle/` in its global ignore would exclude the directory itself, making
+the negation unreachable and failing the marker assertion locally while passing in CI --
+the exact failure the helper exists to prevent.
+
+### Detail of changes made:
+- `git init -q --template= <sandbox>` so no info/exclude is copied in from a template dir.
+- `-c core.excludesFile=/dev/null` before check-ignore, via a new `isolated` option on the
+  existing `checkIgnore` helper.
+- Folded the sandbox loop into that same helper by adding a `cwd` option, deleting the
+  duplicated exit-status-1 error handling roborev also flagged.
+- Hoisted the app-state paths into `SPARKLE_APP_STATE` so they are written once.
+- Corrected the comment, which had claimed an isolation the code did not implement.
+
+### Verification:
+- Proved the fix BOTH directions rather than trusting it: planted a hostile global ignore
+  containing `.sparkle/`, confirmed an UNISOLATED probe reports the marker as ignored (the
+  assertion would have failed), and confirmed the isolated test still passes 3/3 under it.
+- This machine has core.excludesFile and init.templateDir unset and no global .sparkle
+  rule, so the hole was latent here -- which is why only review caught it.
+
+### Beads activity:
+- None opened. builder-index-client-kgb still open and unaddressed by this PR, as stated.
+
+### Potential concerns to address:
+- None new.
+
 ## Progress Update as of 2026-09-10 Pacific
 *(Most recent updates at top)*
 
