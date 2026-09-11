@@ -2,60 +2,73 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import * as fs from "node:fs";
-import * as path from "node:path";
 import * as os from "node:os";
+import * as path from "node:path";
 
 const REPO_ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], {
   cwd: __dirname,
   encoding: "utf8",
 }).trim();
 
-// A negation (`!path`) is unreachable if any earlier rule excludes a PARENT
+// A negation (`!path`) is unreachable if an earlier rule excludes a PARENT
 // DIRECTORY outright: git does not descend into an excluded directory, so it
-// never sees the file the negation is trying to re-admit. The rule still reads
-// as if it works, and nothing fails — the file is simply never tracked.
+// never sees the file the negation is trying to re-admit. Nothing errors. The
+// file is simply never tracked, and the rule still reads as though it works.
 //
 // This is not hypothetical. Three open PRs proposed
 //   .sparkle/
 //   !.sparkle/merge-policy.json
 // which silently keeps merge-policy.json out. The working spelling excludes the
-// directory's CONTENTS instead, leaving the negation reachable:
+// directory's CONTENTS, leaving the negation reachable:
 //   .sparkle/*
 //   !.sparkle/merge-policy.json
-//
-// Rather than re-implement gitignore matching, ask git: for every negated path,
-// git must agree the path is NOT ignored. `--no-index` so a path that does not
-// exist on disk still answers.
 
-function negatedPaths(gitignore: string): string[] {
-  const dir = path.posix.dirname(gitignore) === "." ? "" : path.posix.dirname(gitignore) + "/";
-  return fs
-    .readFileSync(path.join(REPO_ROOT, gitignore), "utf8")
+/** A `!` line, resolved to the repo-relative path it re-admits. */
+function negatedPaths(gitignore: string, rules: string): string[] {
+  const dir = path.posix.dirname(gitignore);
+  const prefix = dir === "." ? "" : dir + "/";
+  return rules
     .split("\n")
     .map((line) => line.trim())
     .filter((line) => line.startsWith("!") && line.length > 1)
-    .map((line) => dir + line.slice(1).replace(/^\/+/, ""));
+    .map((line) => prefix + line.slice(1).replace(/^\/+/, ""));
 }
 
 /**
- * Evaluate a .gitignore's own rules in ISOLATION, in a throwaway repo.
+ * Evaluate one .gitignore's own rules in ISOLATION, in a throwaway repo.
  *
- * Deliberately not `git check-ignore` against this checkout: that answers
- * "is this path ignored here", which folds in `$GIT_DIR/info/exclude` and any
- * global excludesFile. This repo's shared git dir carries a bare `.sparkle/`
- * in info/exclude, so the live check reports a correctly-written negation as
- * shadowed and the test fails on a rule that is fine. What we want to know is
- * narrower and machine-independent: taken on their own, do the committed rules
- * leave each negation reachable?
+ * Deliberately not `git check-ignore` against this checkout. That answers "is
+ * this path ignored here", which folds in $GIT_DIR/info/exclude — and this
+ * repo's shared git dir carries a bare `.sparkle/` there, so the live check
+ * reports a correctly-written negation as shadowed and fails on exactly the
+ * machine whose configuration motivated the rule. The question worth asking is
+ * narrower: taken on their own, do the committed rules leave the negation
+ * reachable?
+ *
+ * A fresh `git init` still reads the operator's global ignore, so
+ * `core.excludesFile=/dev/null` is what actually makes this machine-independent
+ * — without it a personal `.env*` or `.sparkle/` there fails this test on one
+ * machine only, which is the same false failure the isolation exists to prevent.
+ *
+ * The rules are written at their real path inside the scratch repo so anchored
+ * patterns (a leading or interior slash) resolve against the same directory
+ * they do here; writing a nested file's rules at the root would silently
+ * re-anchor them and let a genuinely unreachable negation pass.
  */
-function isIgnoredByRulesAlone(rules: string, relativePath: string): boolean {
+function isIgnoredByRulesAlone(gitignore: string, rules: string, relativePath: string): boolean {
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "ignore-neg-"));
   try {
     execFileSync("git", ["init", "-q", scratch]);
-    fs.writeFileSync(path.join(scratch, ".gitignore"), rules);
-    const result = spawnSync("git", ["check-ignore", "-q", "--no-index", "--", relativePath], {
-      cwd: scratch,
-    });
+    const target = path.join(scratch, gitignore);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, rules);
+
+    const result = spawnSync(
+      "git",
+      ["-c", "core.excludesFile=/dev/null", "check-ignore", "-q", "--no-index", "--", relativePath],
+      { cwd: scratch },
+    );
+    // 0 = ignored, 1 = not ignored; anything else is a real failure.
     if (result.status !== 0 && result.status !== 1) {
       throw new Error(`git check-ignore failed on ${relativePath}: status ${result.status}`);
     }
@@ -74,15 +87,39 @@ function trackedGitignores(): string[] {
     .filter(Boolean);
 }
 
+test("the reachability check can tell the two spellings apart", () => {
+  // A positive control on THE HELPER, not on git. Without it the repo scan below
+  // passes just as happily on a repo with no negations at all, or if the helper
+  // silently stopped working — a wrong cwd, rules written to the wrong path, an
+  // inverted status check. It queries a path that does not exist on disk, which
+  // is what every real call does.
+  assert.equal(isIgnoredByRulesAlone(".gitignore", "sub/\n!sub/keep.json\n", "sub/keep.json"), true);
+  assert.equal(
+    isIgnoredByRulesAlone(".gitignore", "sub/*\n!sub/keep.json\n", "sub/keep.json"),
+    false,
+  );
+
+  // Anchoring survives for a nested .gitignore: an interior slash anchors to the
+  // file's own directory, so the rules must be written there and not at the root.
+  assert.equal(
+    isIgnoredByRulesAlone("pkg/.gitignore", "/cache/\n!/cache/keep\n", "pkg/cache/keep"),
+    true,
+  );
+  assert.equal(
+    isIgnoredByRulesAlone("pkg/.gitignore", "/cache/*\n!/cache/keep\n", "pkg/cache/keep"),
+    false,
+  );
+});
+
 test("every .gitignore negation is reachable", () => {
   const unreachable: string[] = [];
 
   for (const gitignore of trackedGitignores()) {
     const rules = fs.readFileSync(path.join(REPO_ROOT, gitignore), "utf8");
-    for (const negated of negatedPaths(gitignore)) {
-      // A negation that git still reports as ignored has been shadowed by a
-      // parent-directory exclusion earlier in the file.
-      if (isIgnoredByRulesAlone(rules, negated)) unreachable.push(`${gitignore} -> !${negated}`);
+    for (const negated of negatedPaths(gitignore, rules)) {
+      if (isIgnoredByRulesAlone(gitignore, rules, negated)) {
+        unreachable.push(`${gitignore} -> !${negated}`);
+      }
     }
   }
 
@@ -95,29 +132,4 @@ test("every .gitignore negation is reachable", () => {
       `"dir/*" rather than "dir/" — which leaves the negation reachable:\n  ` +
       unreachable.join("\n  "),
   );
-});
-
-test("the check can actually fail", () => {
-  // A positive control. Without this, the test above passes just as happily on a
-  // repo with no negations at all, or if `isIgnored` silently stopped working.
-  const scratch = fs.mkdtempSync(path.join(require("node:os").tmpdir(), "ignore-neg-"));
-  try {
-    execFileSync("git", ["init", "-q", scratch]);
-    fs.mkdirSync(path.join(scratch, "sub"));
-    fs.writeFileSync(path.join(scratch, "sub", "keep.json"), "{}\n");
-
-    const check = (rules: string) => {
-      fs.writeFileSync(path.join(scratch, ".gitignore"), rules);
-      return spawnSync("git", ["check-ignore", "-q", "--no-index", "--", "sub/keep.json"], {
-        cwd: scratch,
-      }).status;
-    };
-
-    // Bare directory exclusion shadows the negation: git still calls it ignored.
-    assert.equal(check("sub/\n!sub/keep.json\n"), 0);
-    // Excluding the contents leaves the negation reachable.
-    assert.equal(check("sub/*\n!sub/keep.json\n"), 1);
-  } finally {
-    fs.rmSync(scratch, { recursive: true, force: true });
-  }
 });
