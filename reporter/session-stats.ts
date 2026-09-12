@@ -11,6 +11,266 @@ export interface SessionStatsBlob {
   [key: string]: unknown;
 }
 
+type PrivacyScalar = "number" | "string" | "boolean" | "null";
+type PrivacyRule =
+  | PrivacyScalar
+  | { readonly fields: Readonly<Record<string, PrivacyRule>> }
+  | { readonly list: PrivacyRule }
+  | { readonly map: PrivacyRule }
+  | { readonly oneOf: readonly PrivacyRule[] };
+
+const numberMap = { map: "number" } as const satisfies PrivacyRule;
+const nullableNumber = { oneOf: ["number", "null"] } as const satisfies PrivacyRule;
+const distributionBucket = {
+  fields: {
+    count: "number",
+    edge: { oneOf: ["null", { list: nullableNumber }] },
+  },
+} as const satisfies PrivacyRule;
+const scopedDistribution = {
+  fields: {
+    buckets: { oneOf: ["null", { list: distributionBucket }] },
+    mean: "number",
+  },
+} as const satisfies PrivacyRule;
+const scopedDistributionPair = {
+  fields: {
+    scope_all: scopedDistribution,
+    scope_human: scopedDistribution,
+  },
+} as const satisfies PrivacyRule;
+const percentiles = {
+  fields: { mean: "number", p50: "number", p90: "number" },
+} as const satisfies PrivacyRule;
+const money = { fields: { microdollars: "number" } } as const satisfies PrivacyRule;
+
+// This is intentionally a static v1 allowlist rather than a generic JSON
+// scrubber. If Agentsview adds a field, it stays local until this client has
+// reviewed that field. Transcript, prompt, message, tool input/output and file
+// content have no route through this schema.
+const SESSION_STATS_V1_RULE = {
+  fields: {
+    schema_version: "number",
+    window: {
+      fields: { days: "number", since: "string", until: "string" },
+    },
+    filters: {
+      // Project include/exclude arrays are intentionally omitted: local
+      // project names are not needed to render public aggregate statistics.
+      fields: { agent: "string", timezone: "string" },
+    },
+    totals: {
+      fields: {
+        messages_total: "number",
+        sessions_all: "number",
+        sessions_automation: "number",
+        sessions_human: "number",
+        sessions_subagent: "number",
+        user_messages_total: "number",
+      },
+    },
+    agent_portfolio: {
+      fields: {
+        by_messages: numberMap,
+        by_messages_human: numberMap,
+        by_sessions: numberMap,
+        by_sessions_human: numberMap,
+        by_tokens: numberMap,
+        by_tokens_human: numberMap,
+        primary: "string",
+        primary_human: "string",
+      },
+    },
+    archetypes: {
+      fields: {
+        automation: "number",
+        deep: "number",
+        marathon: "number",
+        primary: "string",
+        primary_human: "string",
+        quick: "number",
+        standard: "number",
+      },
+    },
+    velocity: {
+      fields: {
+        first_response_seconds: percentiles,
+        messages_per_active_hour: "number",
+        turn_cycle_seconds: percentiles,
+      },
+    },
+    temporal: {
+      fields: {
+        hourly_utc: {
+          oneOf: [
+            "null",
+            { list: { fields: { sessions: "number", ts: "string", user_messages: "number" } } },
+          ],
+        },
+        reporter_timezone: "string",
+      },
+    },
+    cache_economics: {
+      fields: {
+        cache_hit_ratio: {
+          fields: {
+            buckets: { oneOf: ["null", { list: distributionBucket }] },
+            overall: "number",
+          },
+        },
+        claude_only: "boolean",
+        saved_vs_uncached: money,
+        spent: money,
+      },
+    },
+    distributions: {
+      fields: {
+        duration_minutes: scopedDistributionPair,
+        peak_context_tokens: {
+          fields: {
+            claude_only: "boolean",
+            null_count: "number",
+            scope_all: scopedDistribution,
+            scope_human: scopedDistribution,
+          },
+        },
+        tools_per_turn: scopedDistributionPair,
+        user_messages: scopedDistributionPair,
+      },
+    },
+    model_mix: { fields: { by_tokens: numberMap } },
+    tool_mix: { fields: { by_category: numberMap, total_calls: "number" } },
+    adoption: {
+      fields: {
+        adoption_scope: "string",
+        claude_only: "boolean",
+        distinct_skills: "number",
+        plan_mode_rate: "number",
+        subagents_per_session: "number",
+      },
+    },
+    outcomes: {
+      fields: {
+        avg_edit_churn: "number",
+        claude_only: "boolean",
+        compactions_per_session: "number",
+        failure: "number",
+        grade_distribution: numberMap,
+        success: "number",
+        tool_retry_rate: "number",
+        unknown: "number",
+      },
+    },
+    outcome_stats: {
+      fields: {
+        commits: "number",
+        files_changed: "number",
+        loc_added: "number",
+        loc_removed: "number",
+        prs_merged: "number",
+        prs_opened: "number",
+        repos_active: "number",
+      },
+    },
+    code_attribution: {
+      fields: {
+        sources: {
+          oneOf: [
+            "null",
+            {
+              list: {
+                fields: {
+                  provider: "string",
+                  scope: "string",
+                  status: "string",
+                  metrics: {
+                    fields: {
+                      ai_authored_pct: "number",
+                      blank_lines_added: "number",
+                      blank_lines_deleted: "number",
+                      composer_lines_added: "number",
+                      composer_lines_deleted: "number",
+                      conversation_counts: {
+                        oneOf: [
+                          "null",
+                          { list: { fields: { count: "number", mode: "string", model: "string" } } },
+                        ],
+                      },
+                      human_lines_added: "number",
+                      human_lines_deleted: "number",
+                      lines_added: "number",
+                      lines_deleted: "number",
+                      scored_commits: "number",
+                      tab_lines_added: "number",
+                      tab_lines_deleted: "number",
+                    },
+                  },
+                },
+              },
+            },
+          ],
+        },
+      },
+    },
+    generated_at: "string",
+    extra_homes_merged: "number",
+  },
+} as const satisfies PrivacyRule;
+
+function safeShortText(value: unknown, maxLength = 256): value is string {
+  return typeof value === "string"
+    && value.length <= maxLength
+    && !/[\u0000-\u001f\u007f]/.test(value);
+}
+
+function sanitizeWithRule(value: unknown, rule: PrivacyRule): unknown {
+  if (typeof rule === "string") {
+    if (rule === "null") return value === null ? null : undefined;
+    if (rule === "number") return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+    if (rule === "boolean") return typeof value === "boolean" ? value : undefined;
+    return safeShortText(value) ? value : undefined;
+  }
+  if ("oneOf" in rule) {
+    for (const candidate of rule.oneOf) {
+      const sanitized = sanitizeWithRule(value, candidate);
+      if (sanitized !== undefined) return sanitized;
+    }
+    return undefined;
+  }
+  if ("list" in rule) {
+    if (!Array.isArray(value) || value.length > 1_000) return undefined;
+    const out: unknown[] = [];
+    for (const item of value) {
+      const sanitized = sanitizeWithRule(item, rule.list);
+      if (sanitized !== undefined) out.push(sanitized);
+    }
+    return out;
+  }
+  const record = asRecord(value);
+  if (!record) return undefined;
+  if ("map" in rule) {
+    const out: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(record)) {
+      if (!safeShortText(key, 128)) continue;
+      const sanitized = sanitizeWithRule(item, rule.map);
+      if (sanitized !== undefined) out[key] = sanitized;
+    }
+    return out;
+  }
+  const out: Record<string, unknown> = {};
+  for (const [key, childRule] of Object.entries(rule.fields)) {
+    const sanitized = sanitizeWithRule(record[key], childRule);
+    if (sanitized !== undefined) out[key] = sanitized;
+  }
+  return out;
+}
+
+export function sanitizeSessionStats(value: unknown): SessionStatsBlob | null {
+  const record = asRecord(value);
+  if (!record || record.schema_version !== 1) return null;
+  return sanitizeWithRule(record, SESSION_STATS_V1_RULE) as SessionStatsBlob;
+}
+
 // One extra agentsview home to fold into the stats blob. `dataDir` is the
 // isolated AGENT_VIEWER_DATA_DIR the usage path already synced for this home
 // (see collectExtraAgentsviewHomes in report.ts) — this only ever RE-READS it.
@@ -180,7 +440,7 @@ function runStats(
     return null;
   }
 
-  let parsed: SessionStatsBlob;
+  let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch (err) {
@@ -188,11 +448,12 @@ function runStats(
     return null;
   }
 
-  if (!parsed || typeof parsed !== "object" || typeof parsed.schema_version !== "number") {
-    console.error(`[session-stats] unexpected output shape${label}`);
+  const sanitized = sanitizeSessionStats(parsed);
+  if (!sanitized) {
+    console.error(`[session-stats] unsupported or unsafe output shape${label}`);
     return null;
   }
-  return parsed;
+  return sanitized;
 }
 
 // collectSessionStats runs `agentsview stats --format json` and returns

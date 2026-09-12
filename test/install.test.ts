@@ -8,6 +8,7 @@ function slashPath(p: string): string {
 import {
   stableNodePath,
   buildLaunchdPlist,
+  buildLaunchdInstallCommands,
   buildSystemdService,
   buildSystemdTimer,
   PROJECT_ROOT,
@@ -15,6 +16,55 @@ import {
   LAUNCHD_LABEL,
   SYSTEMD_UNIT_BASENAME,
 } from "../reporter/install";
+
+describe("buildLaunchdInstallCommands", () => {
+  it("uses the modern logged-in user domain, enables reboot loading, and verifies the job", () => {
+    const plistPath = "/Users/alice/Library/LaunchAgents/com.test.reporter.plist";
+    const commands = buildLaunchdInstallCommands({
+      uid: 501,
+      label: "com.test.reporter",
+      plistPath,
+    });
+
+    assert.deepEqual(commands, [
+      {
+        file: "/bin/launchctl",
+        args: ["bootout", "gui/501/com.test.reporter"],
+        tolerateFailure: true,
+      },
+      {
+        file: "/bin/launchctl",
+        args: ["enable", "gui/501/com.test.reporter"],
+      },
+      {
+        file: "/bin/launchctl",
+        args: ["bootstrap", "gui/501", plistPath],
+      },
+      {
+        file: "/bin/launchctl",
+        args: ["kickstart", "-k", "gui/501/com.test.reporter"],
+      },
+      {
+        file: "/bin/launchctl",
+        args: ["print", "gui/501/com.test.reporter"],
+      },
+    ]);
+
+    const commandText = JSON.stringify(commands);
+    assert.doesNotMatch(commandText, /sudo|\bload\b|\bunload\b/);
+  });
+
+  it("refuses a root-domain install", () => {
+    assert.throws(
+      () => buildLaunchdInstallCommands({
+        uid: 0,
+        label: "com.test.reporter",
+        plistPath: "/tmp/com.test.reporter.plist",
+      }),
+      /logged-in user.*root/i,
+    );
+  });
+});
 
 describe("stableNodePath", () => {
   // A brew Cellar path is rewritten to the formula's `opt/` symlink, which
