@@ -29,9 +29,10 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          # 22 is what better-sqlite3 ^11 ships prebuilds for; its source build
-          # on Node 24 linux crashes with "(env) != nullptr". fs.globSync is
-          # stable on 22.17+ (no ExperimentalWarning).
+          # 22 is what better-sqlite3 ^11 ships prebuilds for. Source-built on
+          # Node 24 it runs fine (wakeup does) but aborts at process teardown
+          # in Database::~Database ("(env) != nullptr"), which node --test's
+          # per-file subprocesses hit. fs.globSync is stable on 22.17+.
           node-version: '22'
           cache: npm
 
