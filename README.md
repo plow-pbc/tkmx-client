@@ -231,6 +231,8 @@ The Codex equivalent is `EXTRA_CODEX_CONFIGS` — a comma-separated list of Code
 
 ```
 EXTRA_CODEX_CONFIGS=/path/to/codex-account-a,/path/to/codex-account-b
+# or, so new accounts are picked up without editing .env (an empty match aborts the run):
+EXTRA_CODEX_CONFIGS=/path/to/codex-account-*
 ```
 
 Pi harness and OpenCode can be aggregated the same way when their data lives outside the local machine's default AgentsView scan. These config values point directly at the data directory AgentsView should scan, not at a nested `projects/` or `sessions/` subdirectory:

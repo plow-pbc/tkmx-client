@@ -563,8 +563,13 @@ for (const tc of [
   { agent: "claude", envVar: "EXTRA_CLAUDE_CONFIGS", subdir: "projects", subdirEnvKey: "CLAUDE_PROJECTS_DIR", source: "claude" },
   { agent: "pi", envVar: "EXTRA_PI_CONFIGS", subdir: ".", subdirEnvKey: "PIEBALD_DIR", source: "pi" },
   { agent: "opencode", envVar: "EXTRA_OPENCODE_CONFIGS", subdir: ".", subdirEnvKey: "OPENCODE_DIR", source: "opencode" },
+]) for (const form of [
+  // A reviewer fleet adds accounts over time; a glob keeps the .env list from
+  // silently drifting behind `codex-account-*` (weeks of unreported usage).
+  { name: "explicit list", value: (root: string, a: string, b: string) => `${a},${b}` },
+  { name: "glob", value: (root: string) => path.join(root, "home-*") },
 ]) {
-  test(`${tc.envVar} sums every configured home's usage into the ${tc.source} source, scanning each right home`, async () => {
+  test(`${tc.envVar} (${form.name}) sums every configured home's usage into the ${tc.source} source, scanning each right home`, async () => {
     const ctx = await setupE2E({
       dailyJson:
         '{"daily":[{"date":"2026-05-25","modelBreakdowns":[{"modelName":"gpt-5.5","inputTokens":1000,"outputTokens":100,"cacheCreationTokens":0,"cacheReadTokens":0}]}]}',
@@ -579,7 +584,7 @@ for (const tc of [
       const result = await runReporter({
         ...ctx.baseEnv,
         REPORT_DAYS: "3650", // wide window so the fixture date passes the sinceStr filter
-        [tc.envVar]: `${homeA},${homeB}`,
+        [tc.envVar]: form.value(extraRoot, homeA, homeB),
       });
       assert.equal(
         result.status,
@@ -624,6 +629,25 @@ for (const tc of [
     }
   });
 }
+
+// A glob that matches nothing is the same silent-undercount hazard as a
+// missing home: the operator configured it, so an empty expansion aborts.
+test("an EXTRA_*_CONFIGS glob that matches no directory aborts the run with no POST", async () => {
+  const extraRoot = fs.mkdtempSync(path.join(os.tmpdir(), "tkmx-glob-empty-"));
+  const ctx = await setupE2E({ dailyJson: '{"daily":[]}' });
+  try {
+    const result = await runReporter({
+      ...ctx.baseEnv,
+      EXTRA_CODEX_CONFIGS: path.join(extraRoot, "codex-account-*"),
+    });
+    assert.notEqual(result.status, 0, `reporter should abort on an empty glob.\nstdout:\n${result.stdout}`);
+    assert.match(result.stderr, /matches no directory/i);
+    assert.equal(ctx.getCaptured(), null, "no POST may reach the server");
+  } finally {
+    fs.rmSync(extraRoot, { recursive: true, force: true });
+    ctx.cleanup();
+  }
+});
 
 // Local agents come from the index, so an agent present only as a configured
 // extra home isn't discovered — the reporter unions the two. Without that, a

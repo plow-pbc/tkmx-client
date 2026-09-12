@@ -132,11 +132,21 @@ if (!CLIENT_ID) {
   console.log(`Generated CLIENT_ID=${CLIENT_ID}`);
 }
 
+// Entries may be globs (`/srv/bot/codex-account-*`) so a fleet that adds
+// accounts over time doesn't leave the .env list silently behind. An empty
+// expansion is fatal for the same reason a missing home is: the operator
+// configured it, and reporting nothing for it would be a silent undercount.
 function parseExtraConfigs(raw: string): string[] {
   return (raw || "")
     .split(",")
     .map((s) => s.trim())
-    .filter(Boolean);
+    .filter(Boolean)
+    .flatMap((entry) => {
+      if (!/[*?[]/.test(entry)) return [entry];
+      const matches = fs.globSync(entry).sort();
+      if (matches.length === 0) throw new Error(`EXTRA_*_CONFIGS glob ${entry} matches no directory`);
+      return matches;
+    });
 }
 
 function agentsviewDataDirFor(absConfigDir: string): string {
