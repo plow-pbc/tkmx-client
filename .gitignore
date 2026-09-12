@@ -11,3 +11,22 @@ node_modules/
 .agentsview-update-check
 dist/
 *.tsbuildinfo
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+# Keep this credential pattern at the repo root even though `.beads/.gitignore`
+# repeats it: a slash-free pattern matches at every depth, so a stray key
+# written outside `.beads/` is still ignored. This repo is public.
+.beads-credential-key
+# Machine-local beads state. The git hook wrappers hardcode an absolute path to
+# the developer's home directory, and interactions.jsonl is a per-clone log;
+# `bd init` regenerates both locally. metadata.json is deliberately NOT ignored
+# — it carries the shared project_id/dolt_database identity that clones must
+# agree on for `refs/dolt/data` sync, and `.beads/.gitignore` tracks it by design.
+.beads/hooks/
+.beads/interactions.jsonl
+
+# Sparkle writes .sparkle/merge-policy.json into every agent worktree, which
+# otherwise leaves each one permanently dirty and blocks worktree teardown.
+.sparkle/
