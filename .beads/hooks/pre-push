@@ -1,0 +1,99 @@
+#!/bin/sh
+# pre-push: roborev FAIL-verdict gate, then the beads pre-push lifecycle.
+# The roborev gate is FAIL-OPEN by design: any uncertainty (no roborev, daemon
+# down, parse failure, no python3) allows the push. It must never swallow the
+# beads block below, so it is a function that RETURNS rather than exits.
+# Escape hatch for both: git push --no-verify.
+
+# git feeds the ref list on stdin exactly once; both gates need it, so spool it
+# to a file rather than into a variable. A file hands the same bytes to both
+# gates with no capture-and-replay step to get wrong (`$(cat)` drops trailing
+# newlines and cannot carry NULs), and it costs one mktemp.
+_hook_stdin=$(mktemp 2>/dev/null) || _hook_stdin=""
+
+_roborev_gate() {
+    ROBOREV="$HOME/.local/bin/roborev"
+    [ -x "$ROBOREV" ] || ROBOREV=$(command -v roborev 2>/dev/null)
+    [ -x "$ROBOREV" ] || return 0
+
+    # SHAs being pushed = new commits not already on any remote.
+    shas=""
+    while read -r _lref lsha _rref _rsha; do
+        [ "$lsha" = "0000000000000000000000000000000000000000" ] && continue
+        new=$(git rev-list "$lsha" --not --remotes 2>/dev/null) || return 0
+        shas="$shas $new"
+    done < "$_hook_stdin"
+    [ -n "$(printf '%s' "$shas" | tr -d ' ')" ] || return 0
+
+    json=$("$ROBOREV" list --json --open --limit 1000 2>/dev/null) || return 0
+    blocked=$(printf '%s' "$json" | ROBOREV_SHAS="$shas" python3 -c '
+import sys, json, os
+try: data = json.load(sys.stdin)
+except Exception: sys.exit(0)
+pushed = set(os.environ.get("ROBOREV_SHAS","").split())
+for r in data:
+    if r.get("verdict")=="F" and not r.get("closed") and r.get("status")=="done" and r.get("git_ref") in pushed:
+        print("  %s  %s  (job %s)" % (r.get("git_ref","")[:9], (r.get("commit_subject") or "")[:68], r.get("id")))
+' 2>/dev/null) || return 0
+
+    if [ -n "$blocked" ]; then
+        echo "" >&2
+        echo "roborev: push blocked — these commits have unresolved FAIL (F) reviews:" >&2
+        echo "$blocked" >&2
+        echo "" >&2
+        echo "  Triage:  roborev show <sha>   then fix the issue or  roborev close <job>" >&2
+        echo "  Bypass:  git push --no-verify" >&2
+        echo "" >&2
+        return 1
+    fi
+    return 0
+}
+
+if [ -n "$_hook_stdin" ]; then
+    cat > "$_hook_stdin"
+    _roborev_gate || { rm -f "$_hook_stdin"; exit 1; }
+    # Hand the same stdin to the beads block below (managed section, verbatim).
+    # Unlink as soon as the fd is open: an open fd stays readable after the
+    # unlink, so there is nothing left to clean up on ANY exit path and no trap
+    # to keep in sync with one.
+    exec 0< "$_hook_stdin"
+    rm -f "$_hook_stdin"
+else
+    # No spool file, so the roborev gate cannot read stdin without eating it.
+    # Beads' lifecycle is NOT fail-open — skipping it silently is the exact bug
+    # this hook was rewritten to kill — so say so and let beads have stdin.
+    echo "pre-push: mktemp failed; skipping the roborev gate, running beads" >&2
+fi
+
+# --- BEGIN BEADS INTEGRATION v1.1.2 ---
+# This section is managed by beads. Do not remove these markers.
+if command -v bd >/dev/null 2>&1; then
+  export BD_GIT_HOOK=1
+  _bd_timeout=${BEADS_HOOK_TIMEOUT:-300}
+  _bd_used_perl=0
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$_bd_timeout" bd hooks run pre-push "$@"
+    _bd_exit=$?
+  elif command -v gtimeout >/dev/null 2>&1; then
+    gtimeout "$_bd_timeout" bd hooks run pre-push "$@"
+    _bd_exit=$?
+  elif command -v perl >/dev/null 2>&1; then
+    _bd_used_perl=1
+    perl -e 'alarm shift; exec @ARGV' "$_bd_timeout" bd hooks run pre-push "$@"
+    _bd_exit=$?
+  else
+    echo >&2 "beads: hook 'pre-push' running without timeout; install coreutils or perl to enable BEADS_HOOK_TIMEOUT"
+    bd hooks run pre-push "$@"
+    _bd_exit=$?
+  fi
+  if [ $_bd_exit -eq 124 ] || { [ $_bd_used_perl -eq 1 ] && [ $_bd_exit -eq 142 ]; }; then
+    echo >&2 "beads: hook 'pre-push' timed out after ${_bd_timeout}s — continuing without beads"
+    _bd_exit=0
+  fi
+  if [ $_bd_exit -eq 3 ]; then
+    echo >&2 "beads: database not initialized — skipping hook 'pre-push'"
+    _bd_exit=0
+  fi
+  if [ $_bd_exit -ne 0 ]; then exit $_bd_exit; fi
+fi
+# --- END BEADS INTEGRATION v1.1.2 ---
