@@ -1,3 +1,56 @@
+## Progress Update as of 2026-09-12 14:00 Pacific
+*(Most recent updates at top)*
+
+### Summary of changes since last update
+No change of intent again: rebased the 14 branch commits onto `origin/main`, which
+had moved one commit ahead (#102, "Let EXTRA_*_CONFIGS entries be globs") while
+this PR waited on a human. Same failure mode as the 08-30 entry below, second
+occurrence — the concern that entry closed with was not hypothetical.
+
+The sweep that flagged this reported the branch as `0 commits behind main` *while
+also* conflicting. Both readings were true seven minutes apart: the 08-30 rebase
+really did leave it 0-behind, then #102 landed and made it 1-behind and
+CONFLICTING. A "behind" count cached before the drift reads as an all-clear after
+it. `gh pr view --json mergeable,mergeStateStatus` said CONFLICTING/DIRTY, and
+`git rev-list --left-right --count` said 1/14; the cached count was the only
+disagreeing source.
+
+### Detail of changes made:
+- One conflicting file, `.github/workflows/ci.yml`, in two hunks across two
+  replayed commits (`b527768`, `48bfdd8`). Both hunks were comment-only — no
+  workflow logic conflicted.
+- The second hunk hid a real dependency. `main`'s comment had picked up a new
+  fact from #102 — `fs.globSync is stable on 22.17+` — because #102 routes
+  `EXTRA_*_CONFIGS` globs through `fs.globSync` (`reporter/report.ts:146`). This
+  branch's side rewrote that whole comment, correctly (the better-sqlite3 ^11
+  Node-24-teardown story it described is obsolete under this branch's ^13 bump),
+  but taking this branch's side wholesale would have silently dropped the
+  globSync floor along with the obsolete part. Carried it into the matrix comment
+  instead, where it documents why the `'22'` entry must stay a bare major
+  resolving to newest 22.x rather than a pin below `.17`.
+- Diff of the rebased tree against the pre-rebase head is exactly #102's five
+  files plus those comment lines — no branch work was lost in the replay.
+- Verified on the rebased tree before pushing, on Node 22 (the CI pin):
+  `npm run typecheck` clean, `npm test` 285/285 pass, 0 fail.
+- Pushed with `--force-with-lease` pinned to the pre-rebase sha, so a concurrent
+  push by another agent would be refused rather than overwritten. All 14 commits
+  are DROdio-authored; no other contributor's work was in the rewritten range.
+
+### Beads activity:
+- None on this branch's tracker; `bd` scaffolding still lives in PR #69.
+
+### Potential concerns to address:
+- Second drift-into-conflict for the same PR in two weeks. The 08-30 entry
+  proposed re-basing held PRs on a timer rather than on someone noticing; this
+  recurrence is the evidence for it. The window is short — #102 landed and the
+  sweep caught the conflict seven minutes later.
+- The staleness signal itself is the weaker half. The conflict was detected, but
+  the accompanying `0 commits behind` was served from before the drift, which is
+  exactly the reading that makes a conflicting PR look safe to ignore. A behind
+  count should be recomputed at report time or omitted.
+- The merge of #70 remains the founder's: this repo is pinned MERGE-PROTECTED and
+  refuses agent merges in every form.
+
 ## Progress Update as of 2026-08-30 09:05 Pacific
 *(Most recent updates at top)*
 
