@@ -1,0 +1,239 @@
+#!/bin/sh
+# roborev post-commit — seed-owned wrapper around `roborev post-commit`.
+#
+# SELF-HEAL AGAINST RE-INJECTION — runs first, before the guards, so it happens on
+# every path this hook can take.
+#
+# `roborev install-hook --force`, which a roborev self-update runs, does NOT replace
+# this file: it splices its own unguarded stub in just below the shebang. That stub
+# calls `roborev post-commit` unconditionally, which makes every guard below it dead
+# code WHILE THE FILE STILL LOOKS CORRECTLY INSTALLED — the guards are all still
+# there, they just never decide anything. That is what makes it so expensive: on
+# 2026-07-26 the injection had been in place long enough to bank 11,494
+# permanently-failed jobs and 1,058 queued ones, and every commit was being reviewed
+# twice, with nothing about the hook's appearance giving it away.
+#
+# We can't stop the injection. We can stop it being permanent: strip the block (its
+# marker comment through the bare `_roborev_hook` call) and swap the file in
+# atomically. The damage is then bounded to the single commit the injection arrives
+# on, instead of lasting until someone notices. `mv` is a rename, so the shell
+# currently executing this script keeps reading its own now-unlinked inode and cannot
+# be corrupted mid-run; concurrent commits (this fleet runs dozens) each write their
+# own temp file and race only to install byte-identical content.
+#
+# Requires BOTH markers before touching anything — the injected `_roborev_hook` call
+# AND this file's own "seed-owned wrapper" line — so a developer's unrelated hook
+# that happens to define that function is never rewritten. Rewriting someone else's
+# hook would be a worse bug than the one this fixes.
+_self=$0
+case $_self in /*) ;; *) _self="$(pwd)/$_self" ;; esac
+if [ -w "$_self" ] &&
+   grep -q '^_roborev_hook$' "$_self" 2>/dev/null &&
+   grep -q '^# roborev post-commit — seed-owned wrapper' "$_self" 2>/dev/null; then
+    # mktemp, not "$_self.heal.$$": the predictable name is a symlink-plant target in a shared or
+    # group-writable hooks dir, and a process killed between awk and mv leaves it behind forever.
+    # Leave the "I could not repair myself" note. Shared by both failure paths (an unusable awk
+    # result, and a rename that won't land) so a persistently broken heal is discoverable either way
+    # rather than only in the first case. Written once — a later successful heal clears it.
+    #
+    # Guarded on the DIRECTORY being writable rather than relying on `> file 2>/dev/null`: the shell
+    # processes the failing redirection before 2>/dev/null takes effect, so on the very case where the
+    # note matters most (hooks dir not writable) that form leaks an error into git's output on every
+    # single commit.
+    _note_heal_failed() {
+        if [ -w "${_self%/*}" ] && [ ! -e "$_self.heal-failed" ]; then
+            echo "roborev stub injected into this hook and could not be stripped automatically;" \
+                 "re-install the vendored hook from Sparkle (resources/roborev/post-commit)." \
+                 > "$_self.heal-failed" 2>/dev/null
+        fi
+    }
+    _heal=$(mktemp "$_self.heal.XXXXXX" 2>/dev/null) || _heal="$_self.heal.$$"
+    # Inherit the hook's OWN mode rather than forcing 755 — a deployment that keeps its hooks 0700
+    # must not be silently widened by its own self-repair. The `>` below truncates in place, so the
+    # mode this copy establishes is the mode the healed file keeps.
+    #
+    # `cp -p` can PARTIALLY fail (content copies, the fchmod/chown does not — e.g. a group-writable
+    # hook owned by another user), which would leave mktemp's 0600 in place and install a
+    # NON-EXECUTABLE hook. git silently skips a non-executable hook, so reviews would stop entirely,
+    # forever, with no .heal-failed note because the heal "succeeded". Hence: set the exec bit
+    # explicitly with `chmod u+x`, and assert -x in the sanity chain below rather than trusting the
+    # copy.
+    #
+    # `u+x`, NOT bare `+x`: `+x` means `a+x` masked by umask, which turns a deliberately narrow 0700
+    # hook into 0711 — the widening `cp -p` was chosen to avoid. git runs the hook as its owner, so
+    # the owner bit is the only one that has to be there.
+    cp -p "$_self" "$_heal" 2>/dev/null
+    chmod u+x "$_heal" 2>/dev/null
+    # Two start anchors. The banner is matched version-agnostically (`v[0-9]*`) and the function
+    # definition is matched as a fallback, because pinning the exact "v4" text was itself a silent-
+    # failure mode: a v5 bump would still satisfy the precondition above, awk would copy the file
+    # unchanged, the sanity check would reject it, and this would re-run on EVERY commit forever with
+    # the injection fully intact — the original bug wearing a self-heal that looks like protection.
+    if awk '
+        /^# roborev post-commit hook v[0-9]* - auto-reviews every commit$/ { s=1; next }
+        /^_roborev_hook\(\) \{/ { s=1; next }
+        s && /^_roborev_hook$/ { s=0; next }
+        s { next }
+        { print }
+    ' "$_self" > "$_heal" 2>/dev/null &&
+       [ -s "$_heal" ] &&
+       ! grep -q '^_roborev_hook$' "$_heal" &&
+       # POSITIVE assertion, not just "stub is gone": if a future injection ever placed a marker with
+       # no bare `_roborev_hook` call after it, `s` would stay set to EOF and awk would delete the
+       # guards AND the delegation. That truncated file is non-empty and stub-free, so the two checks
+       # above would happily install a hook that silently stops reviewing anything.
+       grep -q '"\$ROBOREV" post-commit' "$_heal" &&
+       grep -q 'sparkle-test-' "$_heal" &&
+       [ -x "$_heal" ]; then
+        # Clear a previous failure's note ONLY if the install actually happened. Running the `rm`
+        # unconditionally meant a failed `mv` left the injection in place, wrote no new note AND
+        # deleted an older one — a genuinely broken hook ending up looking clean, which is the exact
+        # silent failure the sentinel exists to prevent. A rename that won't land now leaves the note
+        # like any other unrepairable case, and takes its temp file with it.
+        if mv -f "$_heal" "$_self" 2>/dev/null; then
+            rm -f "$_self.heal-failed" 2>/dev/null
+        else
+            rm -f "$_heal"
+            _note_heal_failed
+        fi
+    else
+        rm -f "$_heal"   # awk failed or produced something unusable — leave the hook alone
+        # An injection we could not strip is the one case that silently persists, so make it
+        # DISCOVERABLE instead of retrying invisibly forever.
+        _note_heal_failed
+    fi
+fi
+#
+# roborev enqueues a review for EVERY commit, and the seed sets core.hooksPath
+# GLOBALLY, so this hook also fires inside the throwaway git repos that test
+# suites build under the system temp dir and commit into. pytest's
+# tmp_path_factory roots those at <tmp>/pytest-of-<user>/..., and a suite that
+# commits real fixture data there (e.g. a backfill exporter under test) floods
+# the roborev DB with reviews that are pure noise and have to be closed by hand.
+#
+# Skip ONLY a confirmed pytest path. This is deliberately NARROWER than the
+# display-side _EPHEMERAL_ROOT_PREFIXES in _roborev_hooklib.py (/tmp, /var/folders,
+# …): verify.sh proves the live loop by committing in a generic `mktemp -d` repo
+# under /tmp and asserting the hook enqueued a review, so a blanket temp-dir skip
+# would break that proof. (The display filter still hides any such review from the
+# agent backlog.) If the toplevel can't be resolved we DELEGATE, never skip — so
+# the only divergence from roborev's unguarded stub is for confirmed pytest repos.
+#
+# Require BOTH a `pytest-of-<user>` and a `pytest-<N>` path component (pytest's
+# tmp_path_factory always produces both), not just a bare `pytest-of-` substring —
+# so a project merely named `pytest-of-tools` is still reviewed. In a `case` glob
+# `*` spans `/`, so the two components are NOT required to be adjacent; that's a
+# deliberately loose heuristic, not a precise layout match.
+#
+# Known, accepted narrowness (favoring verify.sh's live-loop proof over breadth):
+#   - a `pytest --basetemp=<dir>` run produces no `pytest-of-` component, so it is
+#     NOT skipped here — if such noise recurs, that's the gap, not a regression;
+#   - conversely, an (improbable) long-lived repo that happens to carry both a
+#     `pytest-of-*` and a later `pytest-*` path component is silently skipped.
+#   Both are deliberate trade-offs, not bugs.
+top=$(git rev-parse --show-toplevel 2>/dev/null || true)
+
+# The repo that OWNS this checkout, resolved ONCE for every guard below.
+#
+# `--show-toplevel` alone cannot see a fixture from inside a LINKED WORKTREE: it reports the
+# worktree's own arbitrary directory. The suites cut worktrees named for the agent under test, so a
+# commit in `<tmp>/sparkle-test-wf-squash-appdata-60589/worktrees/p/sq` reported `sq`, matched
+# nothing, and was enqueued — and those worktree commits were the BULK of the 2026-07-26 flood
+# (1,058 queued / 11,494 permanently-failed jobs), not the top-level ones the guard already caught.
+# `--git-common-dir` is the fix: for a linked worktree it points at the PARENT repo's `.git`, and for
+# an ordinary checkout at the repo's own, so stripping `/.git` recovers the owner either way.
+#
+# Delegate-if-unresolved: anything that doesn't end in `/.git` (a bare repo, a separate-gitdir
+# layout) leaves $owner empty, and only $top is consulted.
+owner=""
+common=$(git rev-parse --git-common-dir 2>/dev/null || true)
+if [ -n "$common" ]; then
+    # A relative answer is relative to git's cwd, which for a hook is the top of the working tree.
+    # Anchor it so the prefix globs below see an absolute path.
+    case "$common" in
+        /*) ;;
+        *) common="$(pwd)/$common" ;;
+    esac
+    case "$common" in
+        */.git) owner=${common%/.git} ;;
+    esac
+fi
+
+# The pytest guard consults the owner too — a linked worktree cut outside the `pytest-of-*/pytest-*`
+# tree is the same blind spot the fixture guard had.
+is_pytest_repo() {
+    case "$1" in */pytest-of-*/pytest-*) return 0 ;; esac
+    return 1
+}
+if is_pytest_repo "$top" || is_pytest_repo "$owner"; then
+    exit 0
+fi
+
+# Skip Sparkle's throwaway test-fixture repos, the JS/Rust-suite analogue of the
+# pytest guard above. Sparkle's Rust + TS test suites `git init` repos named
+# sparkle-{test,accounts,bridge}-* under a temp root, commit fixture data, then
+# delete them before the daemon can review — pure failed-counter + daemon-log
+# noise (the display filter in _roborev_hooklib.py already hides them from the
+# agent backlog, but they still inflate `roborev status` and the logs). Gated on
+# a temp root AND one of those exact name prefixes, so a genuine Sparkle checkout
+# (never under a temp root) can't be skipped, and verify.sh's generic `mktemp`
+# (tmp.XXXX) loop-proof repo is intentionally NOT matched. Same delegate-if-
+# unresolved posture as the pytest guard: an empty $top falls through, never skips.
+#
+# Checked against BOTH this checkout and the repo that OWNS it (see $owner above).
+is_fixture_repo() {
+    _p=$1
+    [ -n "$_p" ] || return 1
+    _in_temp=""
+    case "$_p" in
+        /tmp/*|/private/tmp/*|/var/folders/*|/private/var/folders/*) _in_temp=1 ;;
+    esac
+    # Consult TMPDIR only when it is actually set: an empty "${TMPDIR%/}"/* expands to
+    # `/*`, and a case glob's `*` spans `/`, so `/*` matches EVERY absolute path — the
+    # temp-root gate would be unconditionally true and skip a genuine checkout. TMPDIR
+    # is commonly unset on Linux/CI. (Can't fold this into the single case above and
+    # stay empty-safe: stripping TMPDIR's trailing slash and being safe-when-empty are
+    # mutually exclusive in one glob, so the set-check lives on its own line.)
+    _t="${TMPDIR:-}"; _t="${_t%/}"   # strip trailing slash FIRST, then require non-empty:
+    # an unset TMPDIR *or* TMPDIR="/" both reduce to "" and must NOT become the `/*` glob
+    # (which, case globs spanning `/`, would match every absolute path and skip real reviews).
+    [ -n "$_t" ] && case "$_p" in "$_t"/*) _in_temp=1 ;; esac
+    [ -n "$_in_temp" ] || return 1
+    # ANY path component, not just the basename. Several fixture layouts nest the git repo BELOW
+    # the tagged root — `<tmp>/sparkle-self-test-reuse-<pid>/sparkle-self/repo` (sparkle_agent.rs
+    # `unique_dir`) and `<tmp>/sparkle-test-<tag>-<pid>/repo` (worktree.rs) both end in a basename
+    # of `repo`, so a basename-only test missed them at BOTH $top and $owner. Measured against the
+    # pre-fix enqueue log, the `sparkle-self-test-*/sparkle-self/repo` shape alone accounted for 820
+    # of them. In a `case` glob `*` spans `/`, so `*/prefix-*` matches a component starting with
+    # that prefix at any depth — while still requiring the `/`, so `notsparkle-test-x` is no match.
+    #
+    # `sparkle-self-test-` is its own prefix, NOT covered by `sparkle-test-*`: the component is
+    # `sparkle-self-test-<tag>-<pid>`, which does not start with `sparkle-test-`.
+    case "$_p" in
+        */sparkle-test-*|*/sparkle-self-test-*|*/sparkle-accounts-*|*/sparkle-bridge-*) return 0 ;;
+    esac
+    return 1
+}
+
+if is_fixture_repo "$top" || is_fixture_repo "$owner"; then
+    exit 0
+fi
+
+# NOTE: `roborev install-hook --force` (e.g. a roborev self-update) does NOT replace
+# this file — it SPLICES its unguarded stub in below the shebang and leaves this
+# wrapper underneath, which makes every guard above dead code while the file still
+# looks correctly installed. The self-heal at the top strips it, so no manual
+# re-install is needed; if it ever can't, it leaves a `.heal-failed` note beside
+# this hook rather than retrying invisibly.
+#
+# Locate roborev the same way roborev's own install-hook stub does: the seed's
+# pinned user-scope path first, then PATH; a missing binary is a silent no-op.
+ROBOREV="$HOME/.local/bin/roborev"
+if [ ! -x "$ROBOREV" ]; then
+    ROBOREV=$(command -v roborev 2>/dev/null)
+    if [ -z "$ROBOREV" ] || [ ! -x "$ROBOREV" ]; then exit 0; fi
+fi
+# stderr suppressed and exit status passed straight through, matching roborev's own
+# generated stub — a post-commit hook stays silent (git ignores its exit code
+# anyway); enqueue health is surfaced via `roborev status`, not the hook.
+"$ROBOREV" post-commit 2>/dev/null
