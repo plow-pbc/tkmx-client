@@ -568,6 +568,9 @@ for (const tc of [
   // silently drifting behind `codex-account-*` (weeks of unreported usage).
   { name: "explicit list", value: (root: string, a: string, b: string) => `${a},${b}` },
   { name: "glob", value: (root: string) => path.join(root, "home-*") },
+  // Pinning one home explicitly beside a glob that re-matches it must not
+  // scan it twice — that would double its usage (the mirror of the undercount).
+  { name: "explicit + overlapping glob", value: (root: string, a: string) => `${a},${path.join(root, "home-*")}` },
 ]) {
   test(`${tc.envVar} (${form.name}) sums every configured home's usage into the ${tc.source} source, scanning each right home`, async () => {
     const ctx = await setupE2E({

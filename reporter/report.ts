@@ -137,16 +137,19 @@ if (!CLIENT_ID) {
 // expansion is fatal for the same reason a missing home is: the operator
 // configured it, and reporting nothing for it would be a silent undercount.
 function parseExtraConfigs(raw: string): string[] {
-  return (raw || "")
+  const entries = (raw || "")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean)
     .flatMap((entry) => {
-      if (!/[*?[]/.test(entry)) return [entry];
+      if (!/[*?]/.test(entry)) return [entry];
       const matches = fs.globSync(entry).sort();
       if (matches.length === 0) throw new Error(`EXTRA_*_CONFIGS glob ${entry} matches no directory`);
       return matches;
     });
+  // A home listed explicitly and again via a glob would otherwise be scanned
+  // twice and its usage summed twice (mergeDailyUsage sums colliding rows).
+  return [...new Set(entries.map((e) => path.resolve(e)))];
 }
 
 function agentsviewDataDirFor(absConfigDir: string): string {

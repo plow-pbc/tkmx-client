@@ -31,7 +31,7 @@ jobs:
         with:
           # 22 is the active LTS and is what better-sqlite3 ^11 ships prebuilds
           # for; newer majors can force a source build of the native addon.
-          node-version: '22'
+          node-version: '24'
           cache: npm
 
       # Mirrors `just test`: a failed install is a setup failure, not a test
