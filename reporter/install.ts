@@ -10,6 +10,22 @@ export const REPORT_SCRIPT = path.join(PROJECT_ROOT, "dist", "reporter", "report
 export const LAUNCHD_LABEL = "com.token-tracking.reporter";
 export const SYSTEMD_UNIT_BASENAME = "token-tracking-reporter";
 
+// Where the unit files live. Exported and home-parameterized because install,
+// uninstall, and doctor all need the same three paths, and a doctor that
+// computed them independently could look at a different file than the one
+// install wrote — reading "not installed" off a healthy machine.
+export function launchdPlistPath(home: string): string {
+  return path.join(home, "Library", "LaunchAgents", `${LAUNCHD_LABEL}.plist`);
+}
+
+export function systemdServicePath(home: string): string {
+  return path.join(home, ".config", "systemd", "user", `${SYSTEMD_UNIT_BASENAME}.service`);
+}
+
+export function systemdTimerPath(home: string): string {
+  return path.join(home, ".config", "systemd", "user", `${SYSTEMD_UNIT_BASENAME}.timer`);
+}
+
 // `process.execPath` points at the real on-disk node binary, which on Homebrew
 // is a versioned Cellar path like `/opt/homebrew/Cellar/node/25.8.1_1/bin/node`.
 // Baking that into a launchd plist is a ticking time bomb: the next
@@ -141,7 +157,7 @@ if (require.main === module) {
 }
 
 function installLaunchd(): void {
-  const plistPath = path.join(os.homedir(), "Library", "LaunchAgents", `${LAUNCHD_LABEL}.plist`);
+  const plistPath = launchdPlistPath(os.homedir());
   const logPath = path.join(os.homedir(), "Library", "Logs", "token-tracking-reporter.log");
 
   const plist = buildLaunchdPlist({
@@ -168,8 +184,8 @@ function installSystemd(): void {
   const userDir = path.join(os.homedir(), ".config", "systemd", "user");
   fs.mkdirSync(userDir, { recursive: true });
 
-  const servicePath = path.join(userDir, `${SYSTEMD_UNIT_BASENAME}.service`);
-  const timerPath = path.join(userDir, `${SYSTEMD_UNIT_BASENAME}.timer`);
+  const servicePath = systemdServicePath(os.homedir());
+  const timerPath = systemdTimerPath(os.homedir());
 
   const service = buildSystemdService({
     nodePath: NODE_PATH,
