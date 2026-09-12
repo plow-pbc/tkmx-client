@@ -11,3 +11,13 @@ node_modules/
 .agentsview-update-check
 dist/
 *.tsbuildinfo
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
+.beads/proxieddb/
+# bd init generates these with absolute machine-local home paths; this repo is
+# public, so they must never be tracked. .beads/metadata.json stays TRACKED.
+.beads/hooks/
+.beads/interactions.jsonl
