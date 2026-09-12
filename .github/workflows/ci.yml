@@ -29,10 +29,10 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          # 24 is what every reporting host runs and where fs.globSync is
-          # stable. better-sqlite3 11.10 has no Node 24 prebuild, so npm ci
-          # compiles the addon from source here (ubuntu-latest has the tools).
-          node-version: '24'
+          # 22 is what better-sqlite3 ^11 ships prebuilds for; its source build
+          # on Node 24 linux crashes with "(env) != nullptr". fs.globSync is
+          # stable on 22.17+ (no ExperimentalWarning).
+          node-version: '22'
           cache: npm
 
       # Mirrors `just test`: a failed install is a setup failure, not a test
