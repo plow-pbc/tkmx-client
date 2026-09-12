@@ -29,8 +29,9 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          # 22 is the active LTS and is what better-sqlite3 ^11 ships prebuilds
-          # for; newer majors can force a source build of the native addon.
+          # 24 is what every reporting host runs and where fs.globSync is
+          # stable. better-sqlite3 11.10 has no Node 24 prebuild, so npm ci
+          # compiles the addon from source here (ubuntu-latest has the tools).
           node-version: '24'
           cache: npm
 

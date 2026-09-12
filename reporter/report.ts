@@ -174,8 +174,7 @@ function agentsviewDataDirFor(absConfigDir: string): string {
 // syncs — see ExtraStatsHome.
 function extraStatsHomes(raw: string): ExtraStatsHome[] {
   const homes: ExtraStatsHome[] = [];
-  for (const entry of parseExtraConfigs(raw)) {
-    const absEntry = path.resolve(entry);
+  for (const absEntry of parseExtraConfigs(raw)) {
     const dataDir = agentsviewDataDirFor(absEntry);
     if (!fs.existsSync(dataDir)) continue;
     homes.push({ name: path.basename(absEntry) || absEntry, dataDir });
@@ -199,8 +198,7 @@ function collectExtraAgentsviewHomes(
   opts: { agent: string; subdir: string; subdirEnvKey: string },
 ): DailyUsage[] {
   let daily: DailyUsage[] = [];
-  for (const entry of parseExtraConfigs(raw)) {
-    const absEntry = path.resolve(entry);
+  for (const absEntry of parseExtraConfigs(raw)) {
     const name = path.basename(absEntry) || absEntry;
     const subdirPath = opts.subdir === "." ? absEntry : path.join(absEntry, opts.subdir);
     const expectedPathLabel = opts.subdir === "." ? "directory" : `${opts.subdir}/ subdir`;
