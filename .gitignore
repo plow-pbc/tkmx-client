@@ -11,3 +11,11 @@ node_modules/
 .agentsview-update-check
 dist/
 *.tsbuildinfo
+
+# Findings that scripts/file-retro-pain-point.sh could not file get parked here
+# with their prose intact, to be re-filed on the next run. That is working state,
+# never a deliverable, and this repo is public — so keep it out of `git add -A`.
+# Scoped to the one file rather than all of .beads/, whose tracked-vs-ignored
+# split (metadata.json is shared sync identity and must stay tracked) belongs
+# with the beads scaffolding, not here.
+.beads/retro-pain-point-drops.jsonl
