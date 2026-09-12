@@ -316,6 +316,12 @@ test(".env USERNAME beats inherited OS USERNAME", async () => {
 const PROFILE_PROSE_KEYS = ["tools", "communities", "projects", "about", "hn_username", "demo_video_url"];
 const MINIMAL_ENV = "USERNAME=e2euser\nAPI_KEY=e2ekey\nCLIENT_ID=e2e-client-id-fixed\n";
 const MULTI_MACHINE_HINT = "Reporting from more than one machine?";
+// The echo of what this machine just published. A configured field used to
+// print nothing, so a forgotten machine's stale .env overwrote a corrected
+// profile every cycle with no local trace. These rows pin both directions:
+// what is configured is echoed (with its value, so a stale one is recognisable)
+// and what is not configured is never echoed.
+const PUBLISHED_HEADER = "Published from this machine's .env";
 
 for (const tc of [
   {
@@ -337,6 +343,10 @@ for (const tc of [
       "Set DEMO_VIDEO_URL in .env",
       MULTI_MACHINE_HINT,
     ],
+    // Nothing is configured, so this machine overwrites nothing and must not
+    // claim it published anything. Without this the echo could degrade to
+    // always-on and tell a deliberately-blank machine it is republishing.
+    stdoutLacks: [PUBLISHED_HEADER],
   },
   {
     // hn_username was left out of the hint's condition twice, so a machine with
@@ -350,11 +360,22 @@ for (const tc of [
     },
     present: { tools: "Sparkle.ai", about: "padded on both sides" },
     absent: ["hn_username"],
-    stdoutHas: ["Set HN_USERNAME in .env", MULTI_MACHINE_HINT],
+    stdoutHas: [
+      "Set HN_USERNAME in .env", MULTI_MACHINE_HINT,
+      PUBLISHED_HEADER,
+      // The value, not just the name: recognising a stale URL in this
+      // machine's own log is the entire point of the echo.
+      "DEMO_VIDEO_URL=https://youtu.be/x",
+      "TOOLS=Sparkle.ai",
+      // Echoed post-trim, so what is printed is what was sent.
+      "ABOUT=padded on both sides",
+    ],
     // The other half of the nudge contract: a configured field stops nagging.
     // Without this the loop can lose its `!f.value` guard and nag forever
     // about fields you've already set, with the suite still green.
-    stdoutLacks: ["Set TOOLS in .env"],
+    // The echo's negative half rides along: an unconfigured field is not sent,
+    // so claiming it was published would be a lie about what this machine owns.
+    stdoutLacks: ["Set TOOLS in .env", "HN_USERNAME=", "AVATAR="],
   },
   {
     // AVATAR is omitted-when-unset like the prose fields but lives outside
@@ -381,8 +402,23 @@ for (const tc of [
     },
     present: { tools: "Sparkle.ai", avatar_url: "https://github.com/octocat.png?size=256" },
     absent: [],
-    stdoutHas: [],
+    // AVATAR is echoed as the RESOLVED url actually sent, not the `github:`
+    // shorthand — the profile is overwritten with the former, so that is the
+    // value an operator needs to recognise.
+    stdoutHas: [PUBLISHED_HEADER, "AVATAR=https://github.com/octocat.png?size=256"],
     stdoutLacks: [MULTI_MACHINE_HINT, "Set AVATAR in .env"],
+  },
+  {
+    // The shape the bead was filed on: a machine whose ONLY profile opinion is
+    // a demo video, carried by an .env nobody has looked at in months. Every
+    // other row leaves something else configured, so this is the one that
+    // catches an echo keyed to a field other than the one that reverted.
+    name: "echoes a lone DEMO_VIDEO_URL, the field that reverted in the wild",
+    env: { DEMO_VIDEO_URL: "https://youtu.be/67vGhYrCdrM" },
+    present: { demo_video_url: "https://youtu.be/67vGhYrCdrM" },
+    absent: ["tools", "about", "projects", "communities", "hn_username"],
+    stdoutHas: [PUBLISHED_HEADER, "DEMO_VIDEO_URL=https://youtu.be/67vGhYrCdrM", MULTI_MACHINE_HINT],
+    stdoutLacks: ["TOOLS=", "ABOUT="],
   },
 ]) {
   test(`profile prose payload — ${tc.name}`, async () => {
