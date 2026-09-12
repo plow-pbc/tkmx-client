@@ -42,16 +42,23 @@ const ALLOWED_PLACEHOLDER_USERS = new Set([
   "<name>",
 ]);
 
-// THE single definition of what a home path looks like. The username runs to
-// the first non-name character or end of line — requiring a trailing slash
-// would miss `BEADS_ROOT=/Users/someone` and `cd "/Users/someone"`, which is
-// exactly the shape generated wrappers and gitignore comments produce.
-const HOME_PATH = /(?:\/Users\/|\/home\/)([A-Za-z0-9._<>-]+)(?![A-Za-z0-9._-])/g;
+// THE single definition of where a home path starts. Both the matcher and the
+// git grep pre-filter are derived from this one list, so the two cannot drift:
+// a prefix added here reaches `classify` and is matched by it in the same edit.
+// Spelling them twice would make the dangerous direction silent — a prefix the
+// matcher knows but the pre-filter does not never reaches `classify` at all,
+// and the scan stays green on a real leak.
+const HOME_PREFIXES = ["/Users/", "/home/"];
 
-// git grep is a cheap pre-filter and nothing more: it matches the two fixed
-// prefixes and is deliberately BROADER than HOME_PATH, so it can never be the
-// thing that decides whether a line offends. `classify` alone decides.
-const GREP_PREFIXES = "/Users/|/home/";
+// git grep is a cheap pre-filter and nothing more: it matches the fixed
+// prefixes and leaves every judgement to `classify`.
+const GREP_PREFIXES = HOME_PREFIXES.join("|");
+
+// The username runs to the first non-name character or end of line — requiring
+// a trailing slash would miss `BEADS_ROOT=/Users/someone` and
+// `cd "/Users/someone"`, which is exactly the shape generated wrappers and
+// gitignore comments produce.
+const HOME_PATH = new RegExp(`(?:${GREP_PREFIXES})([A-Za-z0-9._<>-]+)`, "g");
 
 // This file has to contain a non-placeholder example path to test itself with,
 // so it is the one file the repo scan skips. It is a path, not a second
@@ -64,7 +71,7 @@ const SELF = "test/no-absolute-home-paths.test.ts";
  * unit test below is what proves it works — the repo scan cannot, because the
  * real index is clean and so stays green whether this is correct or not.
  */
-export function classify(line: string): string[] {
+function classify(line: string): string[] {
   const offenders: string[] = [];
   for (const match of line.matchAll(HOME_PATH)) {
     if (!ALLOWED_PLACEHOLDER_USERS.has(match[1])) offenders.push(match[1]);
@@ -129,10 +136,13 @@ test("classify flags real usernames and allows documented placeholders", () => {
   );
 });
 
-test("the grep pre-filter is broader than the matcher, so it never decides", () => {
-  // Every prefix the pre-filter looks for must be one HOME_PATH also knows, or
-  // the two could drift into disagreeing about what reaches classify().
-  for (const prefix of GREP_PREFIXES.split("|")) {
+test("every declared prefix survives being built into the matcher", () => {
+  // Pre-filter and matcher are derived from HOME_PREFIXES, so they cannot
+  // disagree about which prefixes exist. What they can still disagree about is
+  // whether a prefix survived interpolation: an entry containing a regex
+  // metacharacter would be spelled literally to git grep and as a pattern to
+  // HOME_PATH. Adding a prefix and not this coverage is what that would cost.
+  for (const prefix of HOME_PREFIXES) {
     assert.deepEqual(classify(`${prefix}${NOT_A_PLACEHOLDER}/x`), [NOT_A_PLACEHOLDER]);
   }
 });
