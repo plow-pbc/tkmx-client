@@ -76,3 +76,24 @@ test(".env.example stays committable despite the broad .env* rule", () => {
     );
   }
 });
+
+// Sparkle drops `.sparkle/merge-policy.json` into every agent worktree it cuts.
+// Nothing here reads it, and an unignored marker keeps the worktree permanently
+// dirty — enough for teardown to refuse and strand it.
+//
+// This asserts the rule is COMMITTED, not merely that the path is ignored: a
+// machine carrying a local `.sparkle/` exclude (this one does, in two places)
+// would pass a plain `check-ignore` on a checkout where the fix was never made,
+// stranding the next agent behind a green suite. Hence a `.gitignore:` prefix on
+// `check-ignore -v` — every override prints a different anchor
+// (`.git/info/exclude:`, `/Users/<someone>/.gitignore:`).
+test("Sparkle's per-worktree marker is ignored by the committed .gitignore", () => {
+  const output = execFileSync(
+    "git", ["check-ignore", "-v", "--no-index", ".sparkle/merge-policy.json"],
+    { cwd: REPO_ROOT, encoding: "utf8" },
+  );
+  assert.ok(
+    output.startsWith(".gitignore:"),
+    `.sparkle/ must be ignored by the committed .gitignore, not by a local override — got "${output.trim()}". A .git/info/exclude or core.excludesFile workaround only helps the machine that made it.`,
+  );
+});
