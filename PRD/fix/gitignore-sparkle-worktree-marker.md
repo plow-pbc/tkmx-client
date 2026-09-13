@@ -1,3 +1,28 @@
+## Progress Update as of 2026-09-13 Pacific
+*(Most recent updates at top)*
+
+### Summary of changes since last update
+Merged `origin/main` (daf67d1, #102 "Let EXTRA_*_CONFIGS entries be globs") into the branch so
+the PR's CI certifies what would actually land. No conflicts and no overlap with this branch's
+files; no change to this branch's own content.
+
+### Detail of changes made:
+- A fresh `git fetch` showed the branch 1 behind `origin/main`, while GitHub still reported the
+  PR CLEAN/MERGEABLE with green checks. Those checks ran against the old base, and #102 edits
+  `.github/workflows/ci.yml`, so they did not cover the merged result. Earlier "0 behind" readings
+  on this branch were from before #102 landed.
+- Merged rather than rebased, to avoid force-pushing a reviewed, approved PR branch.
+- Verified after the merge: `npm run typecheck` clean; `node --test dist/test/gitignore.test.js`
+  3/3. CI re-runs on push against the new base, including the updated workflow.
+
+### Beads activity:
+- No state change. Added second-sighting evidence to builder-index-client-4ed (host-leakage in
+  the local suite) as a comment.
+
+### Potential concerns to address:
+- Landing still waits on a human: the repo is pinned merge-protected, so an agent will not merge
+  it. Each further main commit can re-stale the checks the same way.
+
 ## Progress Update as of 2026-09-01 09:40 PDT
 *(Most recent updates at top)*
 
