@@ -420,9 +420,16 @@ echo '{"daily":[{"date":"2026-08-29","modelBreakdowns":[{"modelName":"gpt-5.6-so
       try {
         const calls = path.join(tmp, "calls.log");
         const bin = path.join(tmp, "fake-agentsview");
+        // The fake logs AFTER the sync branch, so the log records only a
+        // usage call — which is the whole claim here. Logging first raced
+        // the fake's own startup: in the timeout case the kill can land
+        // before /bin/sh reaches its first write, and the exact-transcript
+        // assertion below then failed on a loaded machine for a reason this
+        // case does not care about. The thrown error already proves the
+        // sync ran.
         writeExec(bin, `#!/bin/sh
-echo "$*" >> "${calls}"
 if [ "$1" = "sync" ]; then ${testCase.syncBody}; fi
+echo "$*" >> "${calls}"
 echo '{"daily":[]}'
 `);
 
@@ -438,7 +445,7 @@ echo '{"daily":[]}'
           testCase.errorPattern,
           testCase.name,
         );
-        assert.deepEqual(fs.readFileSync(calls, "utf-8").trim().split("\n"), ["sync"]);
+        assert.equal(fs.existsSync(calls), false, `${testCase.name}: usage must not run after a failed sync`);
       } finally {
         fs.rmSync(tmp, { recursive: true, force: true });
       }
