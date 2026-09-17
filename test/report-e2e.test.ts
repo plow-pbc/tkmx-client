@@ -84,6 +84,10 @@ if (cmd === "usage") {
   console.log(${JSON.stringify(dailyJson)});
   process.exit(0);
 }
+if (process.env.FAIL_STATS) {
+  process.stderr.write("spawnSync agentsview ETIMEDOUT\\n");
+  process.exit(1);
+}
 let since = "";
 for (let i = 0; i < args.length; i++) {
   if (args[i] === "--since") since = args[i + 1] || "";
@@ -128,6 +132,10 @@ case "$1" in
     echo ${shQuote(dailyJson)}
     ;;
   stats)
+    if [ -n "$FAIL_STATS" ]; then
+      echo "spawnSync agentsview ETIMEDOUT" >&2
+      exit 1
+    fi
     SINCE=""
     for ((i=1; i<=$#; i++)); do
       if [[ "\${!i}" == "--since" ]]; then
@@ -811,6 +819,36 @@ test("a frozen profile does not consume the one-shot transition markers", async 
       /stay on its last snapshot/,
       `a frozen profile left the operator no indication the report was not applied:\n${result.stdout}`,
     );
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+// #104: agentsview stats has timed out 8 times on mbp since April. The usage
+// POST still returns 200, so the run printed "Server responded 200" and read as
+// healthy while the profile's stats panels silently kept an older window. The
+// one [session-stats] error scrolls past minutes earlier; nothing at the end of
+// the run said the panels were stale.
+test("a failed session-stats collection is loud at the end of the run", async () => {
+  const ctx = await setupE2E({ dailyJson: '{"daily":[]}' });
+  try {
+    const result = await runReporter({ ...ctx.baseEnv, FAIL_STATS: "1" });
+    const out = result.stdout + result.stderr;
+
+    assert.equal(result.status, 0, `usage is unaffected, so the run still succeeds:\n${out}`);
+    const captured = ctx.getCaptured();
+    assert.ok(captured, "the usage POST still happens when stats fail");
+    assert.equal(
+      captured.session_stats,
+      undefined,
+      "a failed collection must not post a stats blob",
+    );
+    assert.match(
+      out,
+      /SESSION STATS NOT UPDATED/,
+      `the run must end by saying the stats panels are stale:\n${out}`,
+    );
+    assert.match(out, /ETIMEDOUT/, `the cause must still reach the log:\n${out}`);
   } finally {
     ctx.cleanup();
   }
