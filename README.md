@@ -391,6 +391,8 @@ Set `REPORT_DEV_STATS=true` to share how you actually code. This helps the commu
 
 **What's never sent:** file paths, prompt content, tool arguments, repo names, code, commit messages, API keys.
 
+Session statistics pass through a static allowlist before upload: dates, counts, token and cost aggregates, and model and tool *category* names. Anything outside it is dropped, so a field a future `agentsview` release adds stays on your machine until this client has reviewed it — you don't have to trust an upstream release note to know what leaves.
+
 The `REPORT_MACHINE_CONFIG` flag also now includes your configuration stack: MCP server names (no credentials), hook event types, CLAUDE.md size, shell/terminal/editor, and git worktree count.
 
 ### Which skills get reported
