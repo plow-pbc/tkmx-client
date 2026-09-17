@@ -48,17 +48,17 @@ const money = { fields: { microdollars: "number" } } as const satisfies PrivacyR
 // field, it stays local until this client has reviewed that field. Transcript,
 // prompt, message, tool input/output and file content have no route through
 // this schema.
+//
+// Scoped to fields the server actually consumes -- its aggregator's
+// SessionStatsBlob and ask_prompt's SESSION_FIELDS. agentsview also emits
+// `window`, `filters` and `code_attribution`, which no server path reads; they
+// are deliberately absent, so they stay on the machine rather than riding along
+// unused. Add a branch when a consumer lands, not before.
+// (`extra_homes_merged` is added by mergeSessionStats AFTER sanitization, so a
+// rule for it here would never be reached.)
 const SESSION_STATS_RULE = {
   fields: {
     schema_version: "number",
-    window: {
-      fields: { days: "number", since: "string", until: "string" },
-    },
-    filters: {
-      // Project include/exclude arrays are intentionally omitted: local
-      // project names are not needed to render public aggregate statistics.
-      fields: { agent: "string", timezone: "string" },
-    },
     totals: {
       fields: {
         messages_total: "number",
@@ -172,48 +172,7 @@ const SESSION_STATS_RULE = {
         repos_active: "number",
       },
     },
-    code_attribution: {
-      fields: {
-        sources: {
-          oneOf: [
-            "null",
-            {
-              list: {
-                fields: {
-                  provider: "string",
-                  scope: "string",
-                  status: "string",
-                  metrics: {
-                    fields: {
-                      ai_authored_pct: "number",
-                      blank_lines_added: "number",
-                      blank_lines_deleted: "number",
-                      composer_lines_added: "number",
-                      composer_lines_deleted: "number",
-                      conversation_counts: {
-                        oneOf: [
-                          "null",
-                          { list: { fields: { count: "number", mode: "string", model: "string" } } },
-                        ],
-                      },
-                      human_lines_added: "number",
-                      human_lines_deleted: "number",
-                      lines_added: "number",
-                      lines_deleted: "number",
-                      scored_commits: "number",
-                      tab_lines_added: "number",
-                      tab_lines_deleted: "number",
-                    },
-                  },
-                },
-              },
-            },
-          ],
-        },
-      },
-    },
     generated_at: "string",
-    extra_homes_merged: "number",
   },
 } as const satisfies PrivacyRule;
 

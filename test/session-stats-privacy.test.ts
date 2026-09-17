@@ -21,13 +21,12 @@ test("keeps reviewed aggregates and drops transcript-shaped fields", () => {
     prompt: SENTINEL,
   });
 
+  // window / filters / code_attribution are dropped whole: no server path reads
+  // them, so they never leave the machine.
   assert.deepEqual(sanitized, {
     schema_version: 2,
-    window: { days: 28, since: "2026-08-02", until: "2026-08-30" },
     totals: { sessions_all: 12, messages_total: 120 },
     tool_mix: { by_category: { Bash: 7, Task: 2 }, total_calls: 9 },
-    filters: { agent: "all", timezone: "America/Chicago" },
-    code_attribution: { sources: [{ provider: "cursor", scope: "repo", status: "ok" }] },
     generated_at: "2026-08-30T12:00:00Z",
   });
   assert.doesNotMatch(JSON.stringify(sanitized), new RegExp(SENTINEL));

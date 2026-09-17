@@ -265,10 +265,13 @@ test("REPORT_DAYS=1 still invokes agentsview with --since 28d for session_stats"
         `stats invocation should use --since 28d, got: ${line}`,
       );
     }
+    // The argv assertion above is the window check: `window` is not an uploaded
+    // field (no server path reads it), so the POST body cannot carry it. What
+    // the body must show is that a blob was collected from that 28d call.
     assert.equal(
-      captured.session_stats?.window?.since,
-      "28d",
-      "POSTed session_stats should reflect the 28d window that agentsview was asked for",
+      captured.session_stats?.totals?.sessions_all,
+      7,
+      "the 28d stats call's blob should be the one POSTed",
     );
     assert.equal(captured.report_days, 1);
   } finally {
@@ -483,9 +486,9 @@ test("inactive day (no usage rows) still posts and still refreshes session_stats
       "session_stats should still be collected and sent on an inactive day",
     );
     assert.equal(
-      captured.session_stats.window?.since,
-      "28d",
-      "session_stats must still reflect the 28d window, not REPORT_DAYS=1",
+      captured.session_stats.totals?.sessions_all,
+      7,
+      "session_stats must still be collected on an inactive day",
     );
     // Sanity: stats invocation still happened despite no usage rows.
     const argvLines = fs.readFileSync(ctx.argvLog, "utf-8").trim().split("\n");
