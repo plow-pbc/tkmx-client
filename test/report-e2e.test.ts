@@ -88,7 +88,7 @@ let since = "";
 for (let i = 0; i < args.length; i++) {
   if (args[i] === "--since") since = args[i + 1] || "";
 }
-console.log(JSON.stringify({ schema_version: 1, window: { days_arg: since }, totals: { sessions_all: 7 }, generated_at: "2026-04-24T00:00:00Z" }));
+console.log(JSON.stringify({ schema_version: 2, window: { days: 28, since }, totals: { sessions_all: 7 }, generated_at: "2026-04-24T00:00:00Z" }));
 process.exit(0);
 `,
     );
@@ -135,7 +135,7 @@ case "$1" in
         SINCE="\${!j}"
       fi
     done
-    printf '{"schema_version":1,"window":{"days_arg":"%s"},"totals":{"sessions_all":7},"generated_at":"2026-04-24T00:00:00Z"}\\n' "$SINCE"
+    printf '{"schema_version":2,"window":{"days":28,"since":"%s"},"totals":{"sessions_all":7},"generated_at":"2026-04-24T00:00:00Z"}\\n' "$SINCE"
     ;;
   *)
     echo "unexpected: $*" >&2
@@ -266,7 +266,7 @@ test("REPORT_DAYS=1 still invokes agentsview with --since 28d for session_stats"
       );
     }
     assert.equal(
-      captured.session_stats?.window?.days_arg,
+      captured.session_stats?.window?.since,
       "28d",
       "POSTed session_stats should reflect the 28d window that agentsview was asked for",
     );
@@ -483,7 +483,7 @@ test("inactive day (no usage rows) still posts and still refreshes session_stats
       "session_stats should still be collected and sent on an inactive day",
     );
     assert.equal(
-      captured.session_stats.window?.days_arg,
+      captured.session_stats.window?.since,
       "28d",
       "session_stats must still reflect the 28d window, not REPORT_DAYS=1",
     );
