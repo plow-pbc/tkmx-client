@@ -56,6 +56,8 @@ cd tkmx-client
 npm install        # installs deps + builds dist/ (runs `npm run build` via prepare hook)
 ```
 
+**Node 22.17 or newer.** The reporter uses `fs.globSync`, stable only from 22.17, and `better-sqlite3@13` segfaults on 22.0. `npm install` warns on an older runtime rather than refusing, so the install can appear to succeed and then fail at report time.
+
 > **Build:** the source is TypeScript; runtime ships compiled JS from `dist/`. `npm install` triggers the build automatically. To rebuild manually: `npm run build`. The launchd plist / systemd unit written by `install-service` points at `dist/reporter/report.js`, so end-user machines need only Node — no global TypeScript install required.
 
 ### 3. Register your username
