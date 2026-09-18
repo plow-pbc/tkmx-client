@@ -421,9 +421,11 @@ echo '{"daily":[{"date":"2026-08-29","modelBreakdowns":[{"modelName":"gpt-5.6-so
       try {
         const calls = path.join(tmp, "calls.log");
         const bin = path.join(tmp, "fake-agentsview");
+        // Log only after the sync branch: a log written first races the timeout
+        // kill. So an absent log means usage never ran; the throw proves sync did.
         writeExec(bin, `#!/bin/sh
-echo "$*" >> "${calls}"
 if [ "$1" = "sync" ]; then ${testCase.syncBody}; fi
+echo "$*" >> "${calls}"
 echo '{"daily":[]}'
 `);
 
@@ -439,7 +441,7 @@ echo '{"daily":[]}'
           testCase.errorPattern,
           testCase.name,
         );
-        assert.deepEqual(fs.readFileSync(calls, "utf-8").trim().split("\n"), ["sync"]);
+        assert.equal(fs.existsSync(calls), false, `${testCase.name}: usage must not run after a failed sync`);
       } finally {
         fs.rmSync(tmp, { recursive: true, force: true });
       }
