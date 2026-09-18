@@ -117,15 +117,29 @@ function nodeBinaryCheck(input: DiagnoseInput): Check {
   };
 }
 
+// macOS Background Task Management can hold a LaunchAgent at `[enabled,
+// disallowed]` and skip it at login while `launchctl print-disabled` still
+// reports the label ENABLED — so "not loaded" is the only signal available for
+// a cause that lives entirely in System Settings. The reporter appears there as
+// an unnamed "node" next to Zoom and Dropbox updaters, which makes it an easy
+// casualty of a tidy-up. #103: twice on one machine, months of silence each
+// time, and reinstalling only lasts the login session while the switch is off.
+const LOGIN_ITEMS_HINT =
+  " If it is still not loaded after that, check System Settings › Login Items &"
+  + ' Extensions › Allow in the Background: the reporter appears there as an unnamed "node"'
+  + " (Unknown Developer), and macOS skips it at login whenever that switch is off.";
+
 function scheduledCheck(input: DiagnoseInput): Check {
   if (input.unitScheduled) {
     return { name: "service-scheduled", status: "ok", detail: "reporter is loaded and scheduled" };
   }
-  const what = input.platform === "darwin" ? `${LAUNCHD_LABEL} is not loaded` : `${SYSTEMD_UNIT_BASENAME}.timer is not active`;
+  const darwin = input.platform === "darwin";
+  const what = darwin ? `${LAUNCHD_LABEL} is not loaded` : `${SYSTEMD_UNIT_BASENAME}.timer is not active`;
+  const base = `${what} — the unit file exists but nothing will run it; ${INSTALL_HINT}`;
   return {
     name: "service-scheduled",
     status: "fail",
-    detail: `${what} — the unit file exists but nothing will run it; ${INSTALL_HINT}`,
+    detail: darwin ? `${base}.${LOGIN_ITEMS_HINT}` : base,
   };
 }
 

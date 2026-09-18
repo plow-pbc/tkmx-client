@@ -85,6 +85,24 @@ describe("diagnose — the unit itself", () => {
     assert.match(c.detail, /not (loaded|scheduled|active)/i);
   });
 
+  // #103: the unit file existed and launchctl reported the label ENABLED, yet
+  // macOS had it at `[enabled, disallowed, notified]` in Background Task
+  // Management and skipped it at login — twice, for months. Nothing on the
+  // launchd side reveals that, so "not loaded" is the only signal we get and it
+  // has to carry the operator to the toggle that actually caused it.
+  test("an unscheduled darwin unit names the Login Items toggle", () => {
+    const c = checkNamed(healthyInput({ platform: "darwin", unitScheduled: false }), "service-scheduled");
+    assert.match(c.detail, /Login Items/, "must name the System Settings pane");
+    assert.match(c.detail, /node/, "the item appears there as an unnamed 'node'");
+  });
+
+  // Login Items is macOS-only; a systemd box gets no such advice.
+  test("an unscheduled linux unit does not mention Login Items", () => {
+    const c = checkNamed(healthyInput({ platform: "linux", unitScheduled: false }), "service-scheduled");
+    assert.strictEqual(c.status, "fail");
+    assert.doesNotMatch(c.detail, /Login Items/);
+  });
+
   // An uninstalled reporter has no unit to inspect, so node-binary and
   // scheduled checks would be noise blaming the wrong thing.
   test("skips downstream unit checks when nothing is installed", () => {
