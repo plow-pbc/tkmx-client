@@ -148,6 +148,31 @@ interface AgentsviewJson {
 
 export type AgentsviewUsageByAgent = Record<string, DailyUsage[]>;
 
+// Capture ceiling for the usage payload. Node's execFileSync default is 1 MiB,
+// and `usage daily --json --breakdown` overruns it: a fleet machine emitted
+// 1,259,935 bytes for one agent over a 28-day window, which fails the whole
+// report with ENOBUFS before it can POST.
+//
+// Unlike sync's stdout -- which syncExecOptions discards precisely because it
+// scales with session count and so outgrows any fixed number -- this payload is
+// bounded by the report window: one row per (date x model) over REPORT_DAYS, not
+// per session. A larger archive does not make it larger; more model variety in
+// the window does.
+//
+// Sized for the documented backfill, not for the default. README's Backfill
+// section tells operators to set REPORT_DAYS=365 and run once; at the observed
+// density of ~45 KB/day that is ~15.7 MiB for a single agent, so anything in
+// single-digit MiB fails the very path the docs prescribe. 128 MiB leaves ~8x
+// headroom over that.
+//
+// File-local, and deliberately not shared with session-stats.ts, which keeps its
+// own 8 MiB.
+// The two only ever coincided on a number: this one is fatal to the run and
+// scales with REPORT_DAYS, while the stats blob is best-effort and always a
+// fixed 28-day window. Sizing this for a 365-day backfill would otherwise let a
+// runaway best-effort read buffer 128 MiB before failing.
+const USAGE_MAX_BUFFER_BYTES = 128 * 1024 * 1024;
+
 // Which agents to collect comes from the local index, not a list in this file.
 // AgentsView grows parsers between releases — 0.25 already handles copilot,
 // gemini, cursor, iflow and amp beyond the four this used to name — and a
@@ -247,6 +272,7 @@ function queryAgent(
   const execOpts: Parameters<typeof execFileSync>[2] = {
     encoding: "utf-8",
     timeout: timeoutMs,
+    maxBuffer: USAGE_MAX_BUFFER_BYTES,
     env: { ...process.env, ...extraEnv },
   };
   let raw: string;

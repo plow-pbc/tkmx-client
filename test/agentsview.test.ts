@@ -167,6 +167,44 @@ function withLaunchdEnvironment(fn: () => void): void {
   }
 }
 
+// A real fleet machine emitted 1,259,935 bytes of `usage daily --json
+// --breakdown` for one agent over a 28-day window — past execFileSync's 1 MiB
+// default maxBuffer, which killed the whole report with ENOBUFS before it could
+// POST. The payload scales with distinct (date x model) rows in the window, not
+// with archive size, so a small machine can overrun it while a large one does not.
+//
+// Sized past 8 MiB on purpose, not just past the 1 MiB default. README's Backfill
+// section tells operators to run REPORT_DAYS=365 once, which at the observed
+// ~45 KB/day projects to ~15.7 MiB — so a single-digit-MiB ceiling fails the very
+// path the docs prescribe. A payload that only cleared 1 MiB would pass under a
+// ceiling too small for the backfill and prove nothing about it.
+//
+// The fake is node rather than sh so it can emit ~9 MiB without a per-row shell
+// loop; the sh version took seconds for a tenth of this.
+describe("collectAgentsviewUsage with a payload past the 8 MiB ceiling", () => {
+  it("reads a usage payload larger than a single-digit-MiB ceiling", () => {
+    withFakeAgentsview(
+      ["claude"],
+      () => `#!/usr/bin/env node
+if (process.argv[2] === "sync") process.exit(0);
+// ~9 MiB of valid JSON: one date, many model rows with padded names.
+const pad = "m".repeat(2048);
+const rows = [];
+for (let i = 0; i < 4200; i++) {
+  rows.push('{"modelName":"' + i + '-' + pad + '","inputTokens":1,"outputTokens":1}');
+}
+process.stdout.write('{"daily":[{"date":"2026-05-01","modelBreakdowns":[' + rows.join(",") + ']}]}\\n');
+`,
+      (fakeBin) => {
+        const usageByAgent = collectAgentsviewUsage(fakeBin, "20260501") as any;
+        assert.equal(usageByAgent.claude.length, 1, "the large payload must parse, not throw ENOBUFS");
+        assert.equal(usageByAgent.claude[0].date, "2026-05-01");
+        assert.equal(usageByAgent.claude[0].modelBreakdowns.length, 4200);
+      },
+    );
+  });
+});
+
 describe("collectAgentsviewUsage local agents", () => {
   it("collects whatever agents the index holds, syncing once first", () => {
     // `hermes` is the point: it's not one of the four this used to name, and

@@ -2,8 +2,11 @@ import { execFileSync } from "node:child_process";
 import { resolveAgentsview } from "./agentsview";
 import { errMessage } from "./errors";
 
-const DEFAULT_TIMEOUT_MS = 180_000;  // 3 minutes — git integration can be slow
+// Best-effort and always a fixed 28-day window, so it does not need the usage
+// path's backfill-sized ceiling (see USAGE_MAX_BUFFER_BYTES in agentsview.ts).
 const MAX_BUFFER_BYTES = 8 * 1024 * 1024;
+
+const DEFAULT_TIMEOUT_MS = 180_000;  // 3 minutes — git integration can be slow
 
 export interface SessionStatsBlob {
   schema_version: number;
