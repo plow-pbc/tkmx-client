@@ -196,7 +196,7 @@ v1.3.0 replaces `ccusage` + the direct codex sqlite reader with [agentsview](htt
 4. **Bonus: free session viewer.** You now have `agentsview` installed — run `agentsview` in a terminal and you get a full local web UI for browsing and full-text-searching every Claude + Codex session you've ever had. It's a real product, not a data-access tool. See https://agentsview.io for the full feature set.
 5. **Single install story going forward.** One dependency to install, not "ccusage or codex-sqlite-reader depending on which flag you set."
 
-**If you can install agentsview:** `git pull`, install agentsview, run `npm run report`. That's it — existing `.env` settings are unchanged. The `USE_AGENTSVIEW` flag and `CCUSAGE_TIMEOUT_MS` are gone (delete them from your `.env` if present — they're ignored).
+**If you can install agentsview:** `git pull`, `npm ci`, install agentsview, run `npm run report`. That's it — existing `.env` settings are unchanged. The `USE_AGENTSVIEW` flag and `CCUSAGE_TIMEOUT_MS` are gone (delete them from your `.env` if present — they're ignored).
 
 **If you can't or don't want to install agentsview:** pin to the last ccusage-based release. This is a real, working version — it will stay reachable:
 
