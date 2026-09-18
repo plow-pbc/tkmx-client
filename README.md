@@ -56,6 +56,8 @@ cd tkmx-client
 npm install        # installs deps + builds dist/ (runs `npm run build` via prepare hook)
 ```
 
+**Node 22.17 or newer.** The reporter uses `fs.globSync`, stable only from 22.17, and `better-sqlite3@13` segfaults on 22.0. `npm install` warns on an older runtime rather than refusing, so the install can appear to succeed and then fail at report time.
+
 > **Build:** the source is TypeScript; runtime ships compiled JS from `dist/`. `npm install` triggers the build automatically. To rebuild manually: `npm run build`. The launchd plist / systemd unit written by `install-service` points at `dist/reporter/report.js`, so end-user machines need only Node — no global TypeScript install required.
 
 ### 3. Register your username
@@ -149,6 +151,16 @@ Your existing config (credentials, `CLIENT_ID`) is preserved — `git pull` neve
 > **Pre-TypeScript installs:** if your launchd plist or systemd unit was installed before the TypeScript migration, it still points at `reporter/report.js`. A compatibility shim at that path forwards to the compiled `dist/reporter/report.js`, so the daemon keeps working. To get a clean unit pointing at `dist/` directly, re-run `npm run install-service` once after this update — the shim can then be removed in a future release.
 
 > **Homebrew `node@NN` installs:** if your service was installed against a versioned Homebrew formula (`node@22`, `node@24`, …), its unit still points at the raw `Cellar/` path, which the next `brew upgrade` deletes — the reporter then stops silently. `npm install` only rebuilds `dist/`; re-run `npm run install-service` once to repoint the unit at the stable `opt/` symlink.
+
+### Profile stopped updating?
+
+```
+npm run doctor
+```
+
+Checks the three things that stop a machine reporting without any error: whether a service unit is installed, whether the node binary it was baked against still exists, and whether the unit is actually loaded. Exits non-zero when something is wrong.
+
+On macOS, "not loaded" is worth reading closely. **System Settings › Login Items & Extensions › Allow in the Background** can switch the reporter off — it appears there as an unnamed `node` (Unknown Developer), next to Zoom and Dropbox updaters — and macOS then skips it at every login. `launchctl` still reports the label as enabled, so this is invisible from the command line. **Reinstalling is not enough on its own:** it loads the reporter for the current login session even while the switch is off, so `doctor` goes green and then reporting stops again at the next logout.
 
 ### What's new
 
@@ -391,6 +403,8 @@ Set `REPORT_DEV_STATS=true` to share how you actually code. This helps the commu
 
 **What's never sent:** file paths, prompt content, tool arguments, repo names, code, commit messages, API keys.
 
+Session statistics pass through a static allowlist before upload: dates, counts, token and cost aggregates, and model and tool *category* names. Anything outside it is dropped, so a field a future `agentsview` release adds stays on your machine until this client has reviewed it — you don't have to trust an upstream release note to know what leaves.
+
 The `REPORT_MACHINE_CONFIG` flag also now includes your configuration stack: MCP server names (no credentials), hook event types, CLAUDE.md size, shell/terminal/editor, and git worktree count.
 
 ### Which skills get reported
@@ -465,3 +479,9 @@ journalctl --user -u token-tracking-reporter
 ```
 npm run report
 ```
+
+## License
+
+Apache-2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE). Copyright 2025 The Plow Collective, Inc.
+
+"Plow" and the Plow logo are trademarks of The Plow Collective, Inc. The license grants no trademark rights.
