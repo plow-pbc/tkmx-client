@@ -150,6 +150,16 @@ Your existing config (credentials, `CLIENT_ID`) is preserved — `git pull` neve
 
 > **Homebrew `node@NN` installs:** if your service was installed against a versioned Homebrew formula (`node@22`, `node@24`, …), its unit still points at the raw `Cellar/` path, which the next `brew upgrade` deletes — the reporter then stops silently. `npm install` only rebuilds `dist/`; re-run `npm run install-service` once to repoint the unit at the stable `opt/` symlink.
 
+### Profile stopped updating?
+
+```
+npm run doctor
+```
+
+Checks the three things that stop a machine reporting without any error: whether a service unit is installed, whether the node binary it was baked against still exists, and whether the unit is actually loaded. Exits non-zero when something is wrong.
+
+On macOS, "not loaded" is worth reading closely. **System Settings › Login Items & Extensions › Allow in the Background** can switch the reporter off — it appears there as an unnamed `node` (Unknown Developer), next to Zoom and Dropbox updaters — and macOS then skips it at every login. `launchctl` still reports the label as enabled, so this is invisible from the command line. **Reinstalling is not enough on its own:** it loads the reporter for the current login session even while the switch is off, so `doctor` goes green and then reporting stops again at the next logout.
+
 ### What's new
 
 If you're updating an existing install, refer to the config table above and add any new `.env` values you don't already have:
