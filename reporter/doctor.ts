@@ -124,10 +124,16 @@ function nodeBinaryCheck(input: DiagnoseInput): Check {
 // an unnamed "node" next to Zoom and Dropbox updaters, which makes it an easy
 // casualty of a tidy-up. #103: twice on one machine, months of silence each
 // time, and reinstalling only lasts the login session while the switch is off.
+// Unconditional, and it has to be: `install-service` loads the agent for the
+// current login session even while the toggle is off, so gating this on "still
+// not loaded after reinstalling" would hide it in exactly the case it exists
+// for. The operator would see OK, stop, and lose reporting again at the next
+// logout — #103's two outages were each "fixed" by precisely that.
 const LOGIN_ITEMS_HINT =
-  " If it is still not loaded after that, check System Settings › Login Items &"
-  + ' Extensions › Allow in the Background: the reporter appears there as an unnamed "node"'
-  + " (Unknown Developer), and macOS skips it at login whenever that switch is off.";
+  " Also check System Settings › Login Items & Extensions › Allow in the Background:"
+  + ' the reporter appears there as an unnamed "node" (Unknown Developer). While that switch'
+  + " is off, reinstalling loads it for this login session only and macOS skips it again at the"
+  + " next one, so a clean doctor run straight after reinstalling does not mean it is fixed.";
 
 function scheduledCheck(input: DiagnoseInput): Check {
   if (input.unitScheduled) {

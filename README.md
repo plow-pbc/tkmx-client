@@ -158,7 +158,7 @@ npm run doctor
 
 Checks the three things that stop a machine reporting without any error: whether a service unit is installed, whether the node binary it was baked against still exists, and whether the unit is actually loaded. Exits non-zero when something is wrong.
 
-On macOS, "not loaded" is worth reading closely. **System Settings › Login Items & Extensions › Allow in the Background** can switch the reporter off — it appears there as an unnamed `node` (Unknown Developer), next to Zoom and Dropbox updaters — and macOS then skips it at every login. `launchctl` still reports the label as enabled, so this is invisible from the command line, and reinstalling only lasts until the next logout while that switch is off.
+On macOS, "not loaded" is worth reading closely. **System Settings › Login Items & Extensions › Allow in the Background** can switch the reporter off — it appears there as an unnamed `node` (Unknown Developer), next to Zoom and Dropbox updaters — and macOS then skips it at every login. `launchctl` still reports the label as enabled, so this is invisible from the command line. **Reinstalling is not enough on its own:** it loads the reporter for the current login session even while the switch is off, so `doctor` goes green and then reporting stops again at the next logout.
 
 ### What's new
 

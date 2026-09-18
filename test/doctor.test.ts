@@ -79,28 +79,24 @@ describe("diagnose — the unit itself", () => {
     assert.match(c.detail, /install-service/);
   });
 
-  test("fails when the unit is installed but not scheduled", () => {
-    const c = checkNamed(healthyInput({ unitScheduled: false }), "service-scheduled");
-    assert.strictEqual(c.status, "fail");
-    assert.match(c.detail, /not (loaded|scheduled|active)/i);
-  });
-
   // #103: the unit file existed and launchctl reported the label ENABLED, yet
   // macOS had it at `[enabled, disallowed, notified]` in Background Task
   // Management and skipped it at login — twice, for months. Nothing on the
   // launchd side reveals that, so "not loaded" is the only signal we get and it
-  // has to carry the operator to the toggle that actually caused it.
-  test("an unscheduled darwin unit names the Login Items toggle", () => {
-    const c = checkNamed(healthyInput({ platform: "darwin", unitScheduled: false }), "service-scheduled");
-    assert.match(c.detail, /Login Items/, "must name the System Settings pane");
-    assert.match(c.detail, /node/, "the item appears there as an unnamed 'node'");
-  });
-
-  // Login Items is macOS-only; a systemd box gets no such advice.
-  test("an unscheduled linux unit does not mention Login Items", () => {
-    const c = checkNamed(healthyInput({ platform: "linux", unitScheduled: false }), "service-scheduled");
-    assert.strictEqual(c.status, "fail");
-    assert.doesNotMatch(c.detail, /Login Items/);
+  // has to carry the macOS operator to the toggle that actually caused it, and
+  // say that reinstalling alone will not hold. Login Items is macOS-only, so a
+  // systemd box must get none of that advice.
+  test("an unscheduled unit reports per-platform recovery guidance", () => {
+    const cases = [
+      { platform: "darwin" as const, includes: [/not loaded/i, /Login Items/, /node/, /login session only/], excludes: [/systemd/] },
+      { platform: "linux" as const, includes: [/not active/i], excludes: [/Login Items/, /login session only/] },
+    ];
+    for (const row of cases) {
+      const c = checkNamed(healthyInput({ platform: row.platform, unitScheduled: false }), "service-scheduled");
+      assert.strictEqual(c.status, "fail", row.platform);
+      for (const pattern of row.includes) assert.match(c.detail, pattern, `${row.platform}: ${pattern}`);
+      for (const pattern of row.excludes) assert.doesNotMatch(c.detail, pattern, `${row.platform}: ${pattern}`);
+    }
   });
 
   // An uninstalled reporter has no unit to inspect, so node-binary and
