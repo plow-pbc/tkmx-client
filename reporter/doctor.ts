@@ -41,9 +41,9 @@ export function assertSupportedPlatform(platform: NodeJS.Platform): void {
   );
 }
 
-export type CheckStatus = "ok" | "warn" | "fail";
+type CheckStatus = "ok" | "warn" | "fail";
 
-export interface Check {
+interface Check {
   name: string;
   status: CheckStatus;
   detail: string;
@@ -59,7 +59,7 @@ export interface DiagnoseInput {
   unitScheduled: boolean;
 }
 
-export interface Diagnosis {
+interface Diagnosis {
   healthy: boolean;
   checks: Check[];
 }
@@ -155,19 +155,16 @@ export function nodePathFromSystemdUnit(text: string): string | null {
 }
 
 // Only ever asked about a platform assertSupportedPlatform let through, so
-// there is no "cannot tell" answer to represent: either the unit is loaded or
-// it is not.
+// there is no "cannot tell" answer to represent, and no third arm: not darwin
+// means linux. Either the unit is loaded or it is not.
 function probeScheduled(platform: NodeJS.Platform): boolean {
   try {
     if (platform === "darwin") {
       execFileSync("launchctl", ["list", LAUNCHD_LABEL], { stdio: "ignore" });
       return true;
     }
-    if (platform === "linux") {
-      const out = execFileSync("systemctl", ["--user", "is-active", `${SYSTEMD_UNIT_BASENAME}.timer`], { encoding: "utf-8" });
-      return out.trim() === "active";
-    }
-    return false;
+    const out = execFileSync("systemctl", ["--user", "is-active", `${SYSTEMD_UNIT_BASENAME}.timer`], { encoding: "utf-8" });
+    return out.trim() === "active";
   } catch {
     // Both commands exit non-zero for "not loaded"/"inactive", which is the
     // answer we want rather than an error.
@@ -175,7 +172,7 @@ function probeScheduled(platform: NodeJS.Platform): boolean {
   }
 }
 
-export function collectInput(): DiagnoseInput {
+function collectInput(): DiagnoseInput {
   const platform = os.platform();
   assertSupportedPlatform(platform);
   const home = os.homedir();
