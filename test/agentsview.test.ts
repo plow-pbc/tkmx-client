@@ -167,6 +167,37 @@ function withLaunchdEnvironment(fn: () => void): void {
   }
 }
 
+// A real fleet machine emitted 1,259,935 bytes of `usage daily --json
+// --breakdown` for one agent over a 28-day window — past execFileSync's 1 MiB
+// default maxBuffer, which killed the whole report with ENOBUFS before it could
+// POST. The payload scales with distinct (date x model) rows in the window, not
+// with archive size, so a small machine can overrun it while a large one does
+// not. Emit a deliberately over-1-MiB blob and require the query to survive it.
+describe("collectAgentsviewUsage with an over-1-MiB payload", () => {
+  it("reads a usage payload larger than execFileSync's default maxBuffer", () => {
+    withFakeAgentsview(
+      ["claude"],
+      () => `#!/bin/sh
+if [ "$1" = "sync" ]; then exit 0; fi
+# ~1.4 MiB of valid JSON: many model rows on one date.
+printf '{"daily":[{"date":"2026-05-01","modelBreakdowns":['
+i=0
+while [ $i -lt 6000 ]; do
+  [ $i -gt 0 ] && printf ','
+  printf '{"modelName":"padded-model-name-%s-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","inputTokens":1,"outputTokens":1}' "$i"
+  i=$((i+1))
+done
+printf ']}]}\\n'
+`,
+      (fakeBin) => {
+        const usageByAgent = collectAgentsviewUsage(fakeBin, "20260501") as any;
+        assert.equal(usageByAgent.claude.length, 1, "the large payload must parse, not throw ENOBUFS");
+        assert.equal(usageByAgent.claude[0].date, "2026-05-01");
+      },
+    );
+  });
+});
+
 describe("collectAgentsviewUsage local agents", () => {
   it("collects whatever agents the index holds, syncing once first", () => {
     // `hermes` is the point: it's not one of the four this used to name, and

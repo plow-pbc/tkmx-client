@@ -148,6 +148,19 @@ interface AgentsviewJson {
 
 export type AgentsviewUsageByAgent = Record<string, DailyUsage[]>;
 
+// Capture ceiling for agentsview output we actually read. Node's execFileSync
+// default is 1 MiB, and `usage daily --json --breakdown` overruns it: a fleet
+// machine emitted 1,259,935 bytes for one agent over a 28-day window, which
+// fails the whole report with ENOBUFS before it can POST.
+//
+// Unlike sync's stdout -- which syncExecOptions discards precisely because it
+// scales with session count and so outgrows any fixed number -- this payload is
+// bounded by the report window: one row per (date x model) over REPORT_DAYS, not
+// per session. A larger archive does not make it larger; more model variety in
+// those 28 days does. So a fixed ceiling is the right shape here, and 8 MiB is
+// ~6x the largest observed payload.
+export const MAX_BUFFER_BYTES = 8 * 1024 * 1024;
+
 // Which agents to collect comes from the local index, not a list in this file.
 // AgentsView grows parsers between releases — 0.25 already handles copilot,
 // gemini, cursor, iflow and amp beyond the four this used to name — and a
@@ -247,6 +260,7 @@ function queryAgent(
   const execOpts: Parameters<typeof execFileSync>[2] = {
     encoding: "utf-8",
     timeout: timeoutMs,
+    maxBuffer: MAX_BUFFER_BYTES,
     env: { ...process.env, ...extraEnv },
   };
   let raw: string;
