@@ -143,8 +143,10 @@ systemctl --user status token-tracking-reporter.timer
 ```bash
 cd tkmx-client
 git pull
-npm install        # rebuilds dist/ via the prepare hook
+npm ci             # reinstalls from the lockfile, rebuilds dist/ via the prepare hook
 ```
+
+> **`npm ci`, not `npm install`.** `npm install` reconciles an *existing* `node_modules` against the lockfile, which on an update leaves two problems behind: a native dependency can keep a binding compiled against a different Node ABI (the reporter then dies at `require` time with a `better_sqlite3.node` error, not at install time), and npm may rewrite `package-lock.json` with metadata carried over from the version it replaced — which then blocks the *next* `git pull`. `npm ci` installs exactly what the lockfile says and rewrites nothing. It runs the same `prepare` hook, so `dist/` is still built.
 
 Your existing config (credentials, `CLIENT_ID`) is preserved — `git pull` never touches `.env`. **Do not re-clone or delete `.env` as an "update" — see the CLIENT_ID warning in [First run](#5-first-run).**
 
