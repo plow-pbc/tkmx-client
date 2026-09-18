@@ -143,8 +143,10 @@ systemctl --user status token-tracking-reporter.timer
 ```bash
 cd tkmx-client
 git pull
-npm install        # rebuilds dist/ via the prepare hook
+npm ci             # reinstalls from the lockfile, rebuilds dist/ via the prepare hook
 ```
+
+> **`npm ci`, not `npm install`.** `npm install` reconciles an *existing* `node_modules` against the lockfile, which on an update leaves two problems behind: a native dependency can keep a binding compiled against a different Node ABI (the reporter then dies at `require` time with a `better_sqlite3.node` error, not at install time), and npm may rewrite `package-lock.json` with metadata carried over from the version it replaced — which then blocks the *next* `git pull`. `npm ci` installs exactly what the lockfile says and rewrites nothing. It runs the same `prepare` hook, so `dist/` is still built.
 
 Your existing config (credentials, `CLIENT_ID`) is preserved — `git pull` never touches `.env`. **Do not re-clone or delete `.env` as an "update" — see the CLIENT_ID warning in [First run](#5-first-run).**
 
@@ -194,7 +196,7 @@ v1.3.0 replaces `ccusage` + the direct codex sqlite reader with [agentsview](htt
 4. **Bonus: free session viewer.** You now have `agentsview` installed — run `agentsview` in a terminal and you get a full local web UI for browsing and full-text-searching every Claude + Codex session you've ever had. It's a real product, not a data-access tool. See https://agentsview.io for the full feature set.
 5. **Single install story going forward.** One dependency to install, not "ccusage or codex-sqlite-reader depending on which flag you set."
 
-**If you can install agentsview:** `git pull`, install agentsview, run `npm run report`. That's it — existing `.env` settings are unchanged. The `USE_AGENTSVIEW` flag and `CCUSAGE_TIMEOUT_MS` are gone (delete them from your `.env` if present — they're ignored).
+**If you can install agentsview:** `git pull`, `npm ci`, install agentsview, run `npm run report`. That's it — existing `.env` settings are unchanged. The `USE_AGENTSVIEW` flag and `CCUSAGE_TIMEOUT_MS` are gone (delete them from your `.env` if present — they're ignored).
 
 **If you can't or don't want to install agentsview:** pin to the last ccusage-based release. This is a real, working version — it will stay reachable:
 
