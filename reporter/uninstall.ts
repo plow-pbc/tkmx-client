@@ -1,8 +1,13 @@
 import * as fs from "node:fs";
-import * as path from "node:path";
 import { execSync } from "node:child_process";
 import * as os from "node:os";
-import { LAUNCHD_LABEL, SYSTEMD_UNIT_BASENAME } from "./install";
+import {
+  LAUNCHD_LABEL,
+  SYSTEMD_UNIT_BASENAME,
+  launchdPlistPath,
+  systemdServicePath,
+  systemdTimerPath,
+} from "./install";
 
 if (os.platform() === "darwin") {
   uninstallLaunchd();
@@ -14,7 +19,7 @@ if (os.platform() === "darwin") {
 }
 
 function uninstallLaunchd(): void {
-  const plistPath = path.join(os.homedir(), "Library", "LaunchAgents", `${LAUNCHD_LABEL}.plist`);
+  const plistPath = launchdPlistPath(os.homedir());
 
   if (fs.existsSync(plistPath)) {
     try {
@@ -32,9 +37,8 @@ function uninstallLaunchd(): void {
 // branch on darwin. Mirrors install.ts step-for-step, but please sanity-check
 // on linux before relying on it.
 function uninstallSystemd(): void {
-  const userDir = path.join(os.homedir(), ".config", "systemd", "user");
-  const servicePath = path.join(userDir, `${SYSTEMD_UNIT_BASENAME}.service`);
-  const timerPath = path.join(userDir, `${SYSTEMD_UNIT_BASENAME}.timer`);
+  const servicePath = systemdServicePath(os.homedir());
+  const timerPath = systemdTimerPath(os.homedir());
 
   try {
     execSync(`systemctl --user disable --now ${SYSTEMD_UNIT_BASENAME}.timer 2>/dev/null`);
