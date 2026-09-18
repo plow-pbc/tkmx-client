@@ -165,12 +165,13 @@ export type AgentsviewUsageByAgent = Record<string, DailyUsage[]>;
 // single-digit MiB fails the very path the docs prescribe. 128 MiB leaves ~8x
 // headroom over that.
 //
-// Deliberately NOT shared with session-stats.ts, which keeps its own 8 MiB.
+// File-local, and deliberately not shared with session-stats.ts, which keeps its
+// own 8 MiB.
 // The two only ever coincided on a number: this one is fatal to the run and
 // scales with REPORT_DAYS, while the stats blob is best-effort and always a
 // fixed 28-day window. Sizing this for a 365-day backfill would otherwise let a
 // runaway best-effort read buffer 128 MiB before failing.
-export const USAGE_MAX_BUFFER_BYTES = 128 * 1024 * 1024;
+const USAGE_MAX_BUFFER_BYTES = 128 * 1024 * 1024;
 
 // Which agents to collect comes from the local index, not a list in this file.
 // AgentsView grows parsers between releases — 0.25 already handles copilot,
