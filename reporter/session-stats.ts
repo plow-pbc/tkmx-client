@@ -211,13 +211,16 @@ function sanitizeWithRule(value: unknown, rule: PrivacyRule): unknown {
   const record = asRecord(value);
   if (!record) return undefined;
   if ("map" in rule) {
-    const out: Record<string, unknown> = {};
+    // Keys are names the stats report (tools, models, agents, grades): no
+    // prototype while filling, so "__proto__" is kept like any other name; the
+    // plain copy keeps it as an own key.
+    const out: Record<string, unknown> = Object.create(null);
     for (const [key, item] of Object.entries(record)) {
       if (!safeShortText(key, 128)) continue;
       const sanitized = sanitizeWithRule(item, rule.map);
       if (sanitized !== undefined) out[key] = sanitized;
     }
-    return out;
+    return { ...out };
   }
   const out: Record<string, unknown> = {};
   for (const [key, childRule] of Object.entries(rule.fields)) {

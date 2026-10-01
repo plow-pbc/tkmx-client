@@ -51,3 +51,11 @@ test("rejects output that is not a stats blob", () => {
     assert.equal(sanitizeSessionStats(bad), null, `should reject ${JSON.stringify(bad) ?? "undefined"}`);
   }
 });
+
+// A reported name that collides with Object.prototype survives the allowlist.
+test("a map key named __proto__ or constructor is kept, not dropped", () => {
+  const sanitized = sanitizeSessionStats(JSON.parse(
+    '{"schema_version":1,"tool_mix":{"by_category":{"__proto__":3,"constructor":2,"Bash":1},"total_calls":6}}'));
+  const byCategory = (sanitized!.tool_mix as { by_category: Record<string, number> }).by_category;
+  assert.deepEqual(Object.entries(byCategory), [["__proto__", 3], ["constructor", 2], ["Bash", 1]]);
+});
