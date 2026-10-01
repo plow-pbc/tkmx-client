@@ -353,7 +353,8 @@ export function mergeSessionStats(
 
   const pmix = asRecord(primary.tool_mix);
   if (pmix) {
-    const byCat: Record<string, unknown> = { ...(asRecord(pmix.by_category) ?? {}) };
+    // Category names are reported: sum them prototype-free (see the map rule).
+    const byCat: Record<string, unknown> = Object.assign(Object.create(null), asRecord(pmix.by_category) ?? {});
     let calls = num(pmix.total_calls) ?? 0;
     for (const e of extras) {
       const emix = asRecord(e.tool_mix);
@@ -361,7 +362,7 @@ export function mergeSessionStats(
       sumNumericInto(byCat, asRecord(emix.by_category));
       calls += num(emix.total_calls) ?? 0;
     }
-    out.tool_mix = { ...pmix, by_category: byCat, total_calls: calls };
+    out.tool_mix = { ...pmix, by_category: { ...byCat }, total_calls: calls };
   }
 
   const padopt = asRecord(primary.adoption) as Adoption | null;

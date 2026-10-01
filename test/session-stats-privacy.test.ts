@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { sanitizeSessionStats } from "../reporter/session-stats";
+import { sanitizeSessionStats, mergeSessionStats } from "../reporter/session-stats";
 
 const SENTINEL = "TRANSCRIPT_SENTINEL_MUST_STAY_LOCAL";
 
@@ -58,4 +58,12 @@ test("a map key named __proto__ or constructor is kept, not dropped", () => {
     '{"schema_version":1,"tool_mix":{"by_category":{"__proto__":3,"constructor":2,"Bash":1},"total_calls":6}}'));
   const byCategory = (sanitized!.tool_mix as { by_category: Record<string, number> }).by_category;
   assert.deepEqual(Object.entries(byCategory), [["__proto__", 3], ["constructor", 2], ["Bash", 1]]);
+});
+
+// Folding an extra home in keeps such a name too, and sums it.
+test("merging an extra home sums a __proto__ or constructor category", () => {
+  const blob = (n: number) => JSON.parse(`{"schema_version":1,"tool_mix":{"by_category":{"__proto__":${n},"constructor":${n}},"total_calls":${2 * n}}}`);
+  const merged = mergeSessionStats(blob(1), [blob(2)]);
+  const byCategory = (merged!.tool_mix as { by_category: Record<string, number> }).by_category;
+  assert.deepEqual(Object.entries(byCategory), [["__proto__", 3], ["constructor", 3]]);
 });
