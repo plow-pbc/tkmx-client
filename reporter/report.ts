@@ -407,8 +407,8 @@ async function main(): Promise<void> {
   }
   console.log(`  Using agentsview at ${agentsviewBin}`);
 
-  // Keep agentsview current (throttled to once/day, best-effort, opt-out via
-  // AGENTSVIEW_AUTO_UPDATE=false). Runs before the version is reported and the
+  // Update agentsview only when opted in with AGENTSVIEW_AUTO_UPDATE=true
+  // (throttled to once/day). Runs before the version is reported and the
   // data collected so this run already reflects any new binary.
   maybeAutoUpdateAgentsview(agentsviewBin, AGENTSVIEW_UPDATE_STAMP, { nowMs: Date.now() });
 

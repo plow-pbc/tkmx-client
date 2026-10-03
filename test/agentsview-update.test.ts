@@ -7,18 +7,18 @@ import * as fs from "node:fs";
 import { autoUpdateEnabled, maybeAutoUpdateAgentsview } from "../reporter/agentsview-update";
 
 describe("autoUpdateEnabled", () => {
-  it("defaults to enabled when unset", () => {
-    assert.equal(autoUpdateEnabled({}), true);
+  it("defaults to disabled when unset", () => {
+    assert.equal(autoUpdateEnabled({}), false);
   });
 
-  it("treats false/0/no/off (any case) as disabled", () => {
-    for (const v of ["false", "FALSE", "0", "no", "No", "off", "OFF", " false "]) {
+  it("requires an explicit enabled value", () => {
+    for (const v of ["", " ", "anything", "tru", "false", "FALSE", "0", "no", "No", "off", "OFF", " false "]) {
       assert.equal(autoUpdateEnabled({ AGENTSVIEW_AUTO_UPDATE: v }), false, `value: ${JSON.stringify(v)}`);
     }
   });
 
-  it("treats any other value as enabled", () => {
-    for (const v of ["true", "1", "yes", "on", "anything"]) {
+  it("accepts true/1/yes/on regardless of case or surrounding whitespace", () => {
+    for (const v of ["true", "TRUE", "1", "yes", "Yes", "on", "ON", " true "]) {
       assert.equal(autoUpdateEnabled({ AGENTSVIEW_AUTO_UPDATE: v }), true, `value: ${JSON.stringify(v)}`);
     }
   });
@@ -59,9 +59,9 @@ describe("maybeAutoUpdateAgentsview", () => {
       const bin = writeFakeAgentsview(tmp, log);
       const stamp = path.join(tmp, ".agentsview-update-check");
 
-      const ran = maybeAutoUpdateAgentsview(bin, stamp, { nowMs: 1_700_000_000_000 });
+      const ran = maybeAutoUpdateAgentsview(bin, stamp, { nowMs: 1_700_000_000_000, env: { AGENTSVIEW_AUTO_UPDATE: "true" } });
       assert.equal(ran, true);
-      assert.match(fs.readFileSync(log, "utf-8"), /^update /m);
+      assert.match(fs.readFileSync(log, "utf-8"), /^update --yes $/m);
       assert.equal(fs.readFileSync(stamp, "utf-8").trim(), "1700000000000");
     });
   });
@@ -74,7 +74,7 @@ describe("maybeAutoUpdateAgentsview", () => {
       const now = 50 * 24 * 60 * 60 * 1000;
       fs.writeFileSync(stamp, String(now - 60_000)); // checked 1 min ago
 
-      const ran = maybeAutoUpdateAgentsview(bin, stamp, { nowMs: now });
+      const ran = maybeAutoUpdateAgentsview(bin, stamp, { nowMs: now, env: { AGENTSVIEW_AUTO_UPDATE: "true" } });
       assert.equal(ran, false);
       assert.equal(fs.existsSync(log), false, "update must not have been invoked");
     });
@@ -88,27 +88,29 @@ describe("maybeAutoUpdateAgentsview", () => {
       const now = 50 * 24 * 60 * 60 * 1000;
       fs.writeFileSync(stamp, String(now - 25 * 60 * 60 * 1000)); // 25h ago
 
-      const ran = maybeAutoUpdateAgentsview(bin, stamp, { nowMs: now });
+      const ran = maybeAutoUpdateAgentsview(bin, stamp, { nowMs: now, env: { AGENTSVIEW_AUTO_UPDATE: "true" } });
       assert.equal(ran, true);
-      assert.match(fs.readFileSync(log, "utf-8"), /^update /m);
+      assert.match(fs.readFileSync(log, "utf-8"), /^update --yes $/m);
     });
   });
 
-  it("does nothing when disabled via env, even with no stamp", () => {
-    withTmp((tmp) => {
-      const log = path.join(tmp, "argv.log");
-      const bin = writeFakeAgentsview(tmp, log);
-      const stamp = path.join(tmp, ".agentsview-update-check");
+  for (const value of [undefined, "", "false", "anything"]) {
+    it(`does not invoke the binary or write a stamp without opt-in (${JSON.stringify(value)})`, () => {
+      withTmp((tmp) => {
+        const log = path.join(tmp, "argv.log");
+        const bin = writeFakeAgentsview(tmp, log);
+        const stamp = path.join(tmp, ".agentsview-update-check");
 
-      const ran = maybeAutoUpdateAgentsview(bin, stamp, {
-        nowMs: 1_700_000_000_000,
-        env: { AGENTSVIEW_AUTO_UPDATE: "false" },
+        const ran = maybeAutoUpdateAgentsview(bin, stamp, {
+          nowMs: 1_700_000_000_000,
+          env: value === undefined ? {} : { AGENTSVIEW_AUTO_UPDATE: value },
+        });
+        assert.equal(ran, false);
+        assert.equal(fs.existsSync(log), false, "must not invoke the binary without opt-in");
+        assert.equal(fs.existsSync(stamp), false, "must not record an update attempt without opt-in");
       });
-      assert.equal(ran, false);
-      assert.equal(fs.existsSync(log), false);
-      assert.equal(fs.existsSync(stamp), false, "disabled run must not write a stamp");
     });
-  });
+  }
 
   it("logs the version change when update bumps the binary", () => {
     withTmp((tmp) => {
@@ -132,7 +134,7 @@ describe("maybeAutoUpdateAgentsview", () => {
       const orig = console.log;
       console.log = (m?: unknown) => { logs.push(String(m)); };
       try {
-        const ran = maybeAutoUpdateAgentsview(bin, stamp, { nowMs: 1_700_000_000_000 });
+        const ran = maybeAutoUpdateAgentsview(bin, stamp, { nowMs: 1_700_000_000_000, env: { AGENTSVIEW_AUTO_UPDATE: "true" } });
         assert.equal(ran, true);
       } finally {
         console.log = orig;
@@ -156,12 +158,12 @@ describe("maybeAutoUpdateAgentsview", () => {
       const stamp = path.join(tmp, ".agentsview-update-check");
 
       // First run attempts the (failing) update but still stamps.
-      const ran = maybeAutoUpdateAgentsview(bin, stamp, { nowMs: 1_700_000_000_000 });
+      const ran = maybeAutoUpdateAgentsview(bin, stamp, { nowMs: 1_700_000_000_000, env: { AGENTSVIEW_AUTO_UPDATE: "true" } });
       assert.equal(ran, true);
       assert.equal(fs.readFileSync(stamp, "utf-8").trim(), "1700000000000");
 
       // Immediately after, it's throttled — no second attempt.
-      const ran2 = maybeAutoUpdateAgentsview(bin, stamp, { nowMs: 1_700_000_000_000 + 60_000 });
+      const ran2 = maybeAutoUpdateAgentsview(bin, stamp, { nowMs: 1_700_000_000_000 + 60_000, env: { AGENTSVIEW_AUTO_UPDATE: "true" } });
       assert.equal(ran2, false);
     });
   });

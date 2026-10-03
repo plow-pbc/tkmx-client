@@ -5,12 +5,11 @@ import { detectAgentsviewVersion } from "./agentsview";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-// Auto-update is opt-OUT. Any of false/0/no/off (case-insensitive) disables
-// it; anything else (including unset) leaves it on. We keep agentsview current
-// so the reporter doesn't silently fall behind the server's MIN-version gate.
+// Leave installation ownership with the user unless they opt in. A self-update
+// can replace a package-managed or source-built binary with a tagged release.
 export function autoUpdateEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   const v = (env.AGENTSVIEW_AUTO_UPDATE ?? "").trim().toLowerCase();
-  return v !== "false" && v !== "0" && v !== "no" && v !== "off";
+  return v === "true" || v === "1" || v === "yes" || v === "on";
 }
 
 function readStamp(stampPath: string): number {
@@ -43,11 +42,9 @@ export interface AutoUpdateOptions {
   env?: NodeJS.ProcessEnv;
 }
 
-// Best-effort, throttled (default once/day) agentsview self-update. Runs
-// `agentsview update --yes`, which downloads and swaps the binary — a plain
-// download+replace with no SQLite write, so unlike `agentsview sync` it does
-// NOT hit the macOS launchd deadlock and is safe to run from the scheduled
-// reporter. Never throws: an update failure must not fail the report.
+// Opt-in, throttled (default once/day) agentsview self-update. Runs
+// `agentsview update --yes`, which replaces the resolved binary and may restart
+// its daemon. Logs update failures and continues with usage collection.
 //
 // The check timestamp is written BEFORE the update runs, so a hang that the
 // timeout reaps (or a crash) doesn't re-attempt every 2h — it waits a full
