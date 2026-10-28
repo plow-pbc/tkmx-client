@@ -22,7 +22,16 @@ export function pendingLine({ pending, username, serverUrl }: PendingLineInput):
   return `  You have ${pending} unanswered ${noun} — answer at ${base}/ask/${encodeURIComponent(username)}`;
 }
 
-type FetchLike = (url: string) => Promise<{ ok: boolean; json: () => Promise<any> }>;
+type FetchLike = (
+  url: string,
+  init: { signal: AbortSignal },
+) => Promise<{ ok: boolean; json: () => Promise<any> }>;
+
+// report.ts awaits this before the one-shot process exits, so a server that
+// accepts the connection and never answers would otherwise hold the reporter
+// open past its next two-hour cycle. Long enough for a slow link, short enough
+// that nobody waits on a courtesy line.
+export const PENDING_TIMEOUT_MS = 5000;
 
 // null means "we could not find out", which callers render as silence. It is
 // deliberately NOT 0: the two are the same on screen but conflating them in the
@@ -31,12 +40,16 @@ export async function fetchPendingCount(
   serverUrl: string,
   username: string,
   fetchImpl?: FetchLike,
+  timeoutMs: number = PENDING_TIMEOUT_MS,
 ): Promise<number | null> {
   const f = fetchImpl ?? (globalThis.fetch as unknown as FetchLike);
   if (!f || !username) return null;
   const base = serverUrl.replace(/\/+$/, "");
   try {
-    const res = await f(`${base}/api/user/${encodeURIComponent(username)}/questions`);
+    const url = `${base}/api/user/${encodeURIComponent(username)}/questions`;
+    // The signal also covers reading the body, so a server that sends headers
+    // and then stalls is bounded too. An abort rejects, which lands in catch.
+    const res = await f(url, { signal: AbortSignal.timeout(timeoutMs) });
     if (!res.ok) return null;
     const body = await res.json();
     const n = Number(body?.pending);

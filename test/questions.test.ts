@@ -48,6 +48,14 @@ for (const [name, impl] of [
   });
 }
 
+test("a server that accepts the connection and never answers times out to null", async () => {
+  const n = await fetchPendingCount(SERVER, "alice", (_url, { signal }) =>
+    new Promise((_resolve, reject) => {
+      signal.addEventListener("abort", () => reject(signal.reason));
+    }), 20);
+  assert.equal(n, null);
+});
+
 test("no username means no request at all", async () => {
   let called = false;
   const n = await fetchPendingCount(SERVER, "", async () => { called = true; return { ok: true, json: async () => ({}) }; });
