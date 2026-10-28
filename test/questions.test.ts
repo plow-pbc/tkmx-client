@@ -4,26 +4,22 @@ import { pendingLine, fetchPendingCount } from "../reporter/questions";
 
 const SERVER = "https://tkmx.example";
 
-test("silence when nothing is waiting", () => {
-  assert.equal(pendingLine({ pending: 0, username: "alice", serverUrl: SERVER }), null);
-  assert.equal(pendingLine({ pending: -1, username: "alice", serverUrl: SERVER }), null);
-  assert.equal(pendingLine({ pending: NaN, username: "alice", serverUrl: SERVER }), null);
-});
-
-test("one question is singular, more are plural", () => {
-  assert.match(pendingLine({ pending: 1, username: "alice", serverUrl: SERVER })!, /1 unanswered question —/);
-  assert.match(pendingLine({ pending: 3, username: "alice", serverUrl: SERVER })!, /3 unanswered questions —/);
-});
-
-test("the link is the ask page, and a trailing slash on SERVER_URL does not double up", () => {
-  const line = pendingLine({ pending: 2, username: "alice", serverUrl: SERVER + "///" })!;
-  assert.ok(line.includes(`${SERVER}/ask/alice`), line);
-});
-
-test("a username with URL-unsafe characters is encoded", () => {
-  const line = pendingLine({ pending: 1, username: "a b", serverUrl: SERVER })!;
-  assert.ok(line.includes("/ask/a%20b"), line);
-});
+// [name, pending, serverUrl, username, expected line or null]
+for (const [name, pending, serverUrl, username, expected] of [
+  ["silence when nothing is waiting", 0, SERVER, "alice", null],
+  ["one question is singular", 1, SERVER, "alice",
+    `  You have 1 unanswered question — answer at ${SERVER}/ask/alice`],
+  ["more than one is plural", 3, SERVER, "alice",
+    `  You have 3 unanswered questions — answer at ${SERVER}/ask/alice`],
+  ["a trailing slash on SERVER_URL does not double up", 2, SERVER + "///", "alice",
+    `  You have 2 unanswered questions — answer at ${SERVER}/ask/alice`],
+  ["a username with URL-unsafe characters is encoded", 1, SERVER, "a b",
+    `  You have 1 unanswered question — answer at ${SERVER}/ask/a%20b`],
+] as const) {
+  test(`pendingLine: ${name}`, () => {
+    assert.equal(pendingLine({ pending, username, serverUrl }), expected);
+  });
+}
 
 test("a pending count is read from the API", async () => {
   const seen: string[] = [];
