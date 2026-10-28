@@ -18,8 +18,8 @@ export interface PendingLineInput {
 export function pendingLine({ pending, username, serverUrl }: PendingLineInput): string | null {
   if (!Number.isFinite(pending) || pending < 1) return null;
   const noun = pending === 1 ? "question" : "questions";
-  const base = serverUrl.replace(/\/+$/, "");
-  return `  You have ${pending} unanswered ${noun} — answer at ${base}/ask/${encodeURIComponent(username)}`;
+  const url = new URL(`/ask/${encodeURIComponent(username)}`, serverUrl);
+  return `  You have ${pending} unanswered ${noun} — answer at ${url}`;
 }
 
 type FetchLike = (
@@ -44,12 +44,11 @@ export async function fetchPendingCount(
 ): Promise<number | null> {
   const f = fetchImpl ?? (globalThis.fetch as unknown as FetchLike);
   if (!f || !username) return null;
-  const base = serverUrl.replace(/\/+$/, "");
   try {
-    const url = `${base}/api/user/${encodeURIComponent(username)}/questions`;
+    const url = new URL(`/api/user/${encodeURIComponent(username)}/questions`, serverUrl);
     // The signal also covers reading the body, so a server that sends headers
     // and then stalls is bounded too. An abort rejects, which lands in catch.
-    const res = await f(url, { signal: AbortSignal.timeout(timeoutMs) });
+    const res = await f(url.toString(), { signal: AbortSignal.timeout(timeoutMs) });
     if (!res.ok) return null;
     const body = await res.json();
     const n = Number(body?.pending);
