@@ -133,11 +133,24 @@ if (!CLIENT_ID) {
   console.log(`Generated CLIENT_ID=${CLIENT_ID}`);
 }
 
+// Entries may be globs (`/srv/bot/codex-account-*`) so a fleet that adds
+// accounts over time doesn't leave the .env list silently behind. An empty
+// expansion is fatal for the same reason a missing home is: the operator
+// configured it, and reporting nothing for it would be a silent undercount.
 function parseExtraConfigs(raw: string): string[] {
-  return (raw || "")
+  const entries = (raw || "")
     .split(",")
     .map((s) => s.trim())
-    .filter(Boolean);
+    .filter(Boolean)
+    .flatMap((entry) => {
+      if (!/[*?]/.test(entry)) return [entry];
+      const matches = fs.globSync(entry).sort();
+      if (matches.length === 0) throw new Error(`EXTRA_*_CONFIGS glob ${entry} matches no directory`);
+      return matches;
+    });
+  // A home listed explicitly and again via a glob would otherwise be scanned
+  // twice and its usage summed twice (mergeDailyUsage sums colliding rows).
+  return [...new Set(entries.map((e) => path.resolve(e)))];
 }
 
 function agentsviewDataDirFor(absConfigDir: string): string {
@@ -162,8 +175,7 @@ function agentsviewDataDirFor(absConfigDir: string): string {
 // syncs — see ExtraStatsHome.
 function extraStatsHomes(raw: string): ExtraStatsHome[] {
   const homes: ExtraStatsHome[] = [];
-  for (const entry of parseExtraConfigs(raw)) {
-    const absEntry = path.resolve(entry);
+  for (const absEntry of parseExtraConfigs(raw)) {
     const dataDir = agentsviewDataDirFor(absEntry);
     if (!fs.existsSync(dataDir)) continue;
     homes.push({ name: path.basename(absEntry) || absEntry, dataDir });
@@ -187,8 +199,7 @@ function collectExtraAgentsviewHomes(
   opts: { agent: string; subdir: string; subdirEnvKey: string },
 ): DailyUsage[] {
   let daily: DailyUsage[] = [];
-  for (const entry of parseExtraConfigs(raw)) {
-    const absEntry = path.resolve(entry);
+  for (const absEntry of parseExtraConfigs(raw)) {
     const name = path.basename(absEntry) || absEntry;
     const subdirPath = opts.subdir === "." ? absEntry : path.join(absEntry, opts.subdir);
     const expectedPathLabel = opts.subdir === "." ? "directory" : `${opts.subdir}/ subdir`;
@@ -294,6 +305,13 @@ interface ServerResponse {
 // devs can self-report honestly and learn from each other's setups. Please don't
 // pee in the punchbowl. If you want to add support for a new tool, we'd love a PR:
 // https://github.com/srosro/tkmx-client
+// End-of-run notices the operator must not scroll past. Three callers now, all
+// printing the same rule-bounded block.
+function banner(title: string, body: string): void {
+  const bar = "=".repeat(72);
+  console.log(`\n${bar}\n⚠️  ${title}\n${bar}\n${body}\n${bar}`);
+}
+
 function postUsage(payload: string): Promise<ServerResponse> {
   const url = new URL("/api/usage", SERVER_URL);
   const transport = url.protocol === "https:" ? https : http;
@@ -390,8 +408,8 @@ async function main(): Promise<void> {
   }
   console.log(`  Using agentsview at ${agentsviewBin}`);
 
-  // Keep agentsview current (throttled to once/day, best-effort, opt-out via
-  // AGENTSVIEW_AUTO_UPDATE=false). Runs before the version is reported and the
+  // Update agentsview only when opted in with AGENTSVIEW_AUTO_UPDATE=true
+  // (throttled to once/day). Runs before the version is reported and the
   // data collected so this run already reflects any new binary.
   maybeAutoUpdateAgentsview(agentsviewBin, AGENTSVIEW_UPDATE_STAMP, { nowMs: Date.now() });
 
@@ -498,6 +516,12 @@ async function main(): Promise<void> {
                       && process.env.REPORT_DEV_STATS === "true",
   };
 
+  // collectSessionStats is best-effort and returns null on any failure, so a
+  // miss is invisible by the time the run prints "Server responded 200". #104
+  // records 8 such misses on one machine since April, each leaving the profile's
+  // stats panels on an older window with nothing saying so.
+  let sessionStatsMissed = false;
+
   if (currentState.dev_stats_on) {
     console.log("  Collecting dev stats...");
 
@@ -517,6 +541,8 @@ async function main(): Promise<void> {
       if (ss) {
         body.session_stats = ss;
         console.log(`  Session stats: ${ss.totals?.sessions_all ?? "?"} sessions, schema v${ss.schema_version}`);
+      } else {
+        sessionStatsMissed = true;
       }
     }
   }
@@ -579,13 +605,15 @@ async function main(): Promise<void> {
     console.log(`  (Reporting from more than one machine? Set the fields above on one machine only — blank here means "leave my profile alone".)`);
   }
 
-  if (response && response.client_update) {
-    const bar = "=".repeat(72);
-    console.log(`\n${bar}\n⚠️  CLIENT UPDATE AVAILABLE\n${bar}\n${response.client_update}\n${bar}`);
-  }
-  if (response && response.agentsview_update) {
-    const bar = "=".repeat(72);
-    console.log(`\n${bar}\n⚠️  AGENTSVIEW UPDATE REQUIRED\n${bar}\n${response.agentsview_update}\n${bar}`);
+  if (response && response.client_update) banner("CLIENT UPDATE AVAILABLE", response.client_update);
+  if (response && response.agentsview_update) banner("AGENTSVIEW UPDATE REQUIRED", response.agentsview_update);
+  if (sessionStatsMissed) {
+    banner(
+      "SESSION STATS NOT UPDATED",
+      "The stats panels on your profile still show the previous window.\n"
+      + "Your usage totals above are unaffected and were posted normally.\n"
+      + "The cause is the [session-stats] line earlier in this log.",
+    );
   }
   if (response && response.profile_frozen) {
     console.log(`  Your profile will stay on its last snapshot until you update.`);

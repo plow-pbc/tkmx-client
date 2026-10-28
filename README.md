@@ -56,6 +56,8 @@ cd tkmx-client
 npm install        # installs deps + builds dist/ (runs `npm run build` via prepare hook)
 ```
 
+**Node 22.17 or newer.** The reporter uses `fs.globSync`, stable only from 22.17, and `better-sqlite3@13` segfaults on 22.0. `npm install` warns on an older runtime rather than refusing, so the install can appear to succeed and then fail at report time.
+
 > **Build:** the source is TypeScript; runtime ships compiled JS from `dist/`. `npm install` triggers the build automatically. To rebuild manually: `npm run build`. The launchd plist / systemd unit written by `install-service` points at `dist/reporter/report.js`, so end-user machines need only Node — no global TypeScript install required.
 
 ### 3. Register your username
@@ -94,6 +96,7 @@ cp .env.example .env
 | `AVATAR` | No | **Not active yet — needs server support.** A picture for your profile, intended to replace the generated letter avatar. Either an `https://` image URL, `gravatar:you@example.com`, or `github:yourhandle`. https only; the Gravatar form hashes your address locally so your email never leaves your machine. The client reports it, but the profile page does not render it yet, so setting this has no visible effect today. |
 | `OPENCLAW_SESSIONS_DIRS` | No | Override OpenClaw auto-discovery with a comma-separated list of session directories. Defaults to auto-discovery of standalone + Plow variants on macOS. See [OpenClaw Usage](#openclaw-usage). |
 | `REPORT_DAYS` | No | Days of history to report (default: `28`). See [Backfill & Optimization](#backfill--optimization) |
+| `AGENTSVIEW_AUTO_UPDATE` | No | Disabled by default. Set to `true` to run `agentsview update --yes` at most once per day. This replaces the resolved AgentsView binary with a tagged release and may restart its daemon. Leave disabled for package-managed or source-built installations and update those yourself. `1`, `yes`, and `on` also enable it, ignoring case and surrounding whitespace; all other values disable it. |
 | `REPORT_MACHINE_CONFIG` | No | Set to `true` to share machine info (OS, CPU, memory, installed skills, MCP servers, hooks, CLAUDE.md stats, shell/editor) on your profile. No prompts, code, or keys are ever sent. |
 | `SKILLS_EXCLUDE` | No | Comma-separated skill or MCP server names to keep off your profile, e.g. `warp,clerk-setup`. Case-insensitive. See [Which skills get reported](#which-skills-get-reported). |
 | `REPORT_DEV_STATS` | No | Set to `true` to share how you code — tool-call frequencies, session stats, cache efficiency, git outcome metrics (commits/LOC/PRs), and Cursor AI attribution. No file paths, prompts, or code are ever sent. See [Dev Stats](#dev-stats). |
@@ -141,14 +144,26 @@ systemctl --user status token-tracking-reporter.timer
 ```bash
 cd tkmx-client
 git pull
-npm install        # rebuilds dist/ via the prepare hook
+npm ci             # reinstalls from the lockfile, rebuilds dist/ via the prepare hook
 ```
+
+> **`npm ci`, not `npm install`.** `npm install` reconciles an *existing* `node_modules` against the lockfile, which on an update leaves two problems behind: a native dependency can keep a binding compiled against a different Node ABI (the reporter then dies at `require` time with a `better_sqlite3.node` error, not at install time), and npm may rewrite `package-lock.json` with metadata carried over from the version it replaced — which then blocks the *next* `git pull`. `npm ci` installs exactly what the lockfile says and rewrites nothing. It runs the same `prepare` hook, so `dist/` is still built.
 
 Your existing config (credentials, `CLIENT_ID`) is preserved — `git pull` never touches `.env`. **Do not re-clone or delete `.env` as an "update" — see the CLIENT_ID warning in [First run](#5-first-run).**
 
 > **Pre-TypeScript installs:** if your launchd plist or systemd unit was installed before the TypeScript migration, it still points at `reporter/report.js`. A compatibility shim at that path forwards to the compiled `dist/reporter/report.js`, so the daemon keeps working. To get a clean unit pointing at `dist/` directly, re-run `npm run install-service` once after this update — the shim can then be removed in a future release.
 
 > **Homebrew `node@NN` installs:** if your service was installed against a versioned Homebrew formula (`node@22`, `node@24`, …), its unit still points at the raw `Cellar/` path, which the next `brew upgrade` deletes — the reporter then stops silently. `npm install` only rebuilds `dist/`; re-run `npm run install-service` once to repoint the unit at the stable `opt/` symlink.
+
+### Profile stopped updating?
+
+```
+npm run doctor
+```
+
+Checks the three things that stop a machine reporting without any error: whether a service unit is installed, whether the node binary it was baked against still exists, and whether the unit is actually loaded. Exits non-zero when something is wrong.
+
+On macOS, "not loaded" is worth reading closely. **System Settings › Login Items & Extensions › Allow in the Background** can switch the reporter off — it appears there as an unnamed `node` (Unknown Developer), next to Zoom and Dropbox updaters — and macOS then skips it at every login. `launchctl` still reports the label as enabled, so this is invisible from the command line. **Reinstalling is not enough on its own:** it loads the reporter for the current login session even while the switch is off, so `doctor` goes green and then reporting stops again at the next logout.
 
 ### What's new
 
@@ -182,7 +197,7 @@ v1.3.0 replaces `ccusage` + the direct codex sqlite reader with [agentsview](htt
 4. **Bonus: free session viewer.** You now have `agentsview` installed — run `agentsview` in a terminal and you get a full local web UI for browsing and full-text-searching every Claude + Codex session you've ever had. It's a real product, not a data-access tool. See https://agentsview.io for the full feature set.
 5. **Single install story going forward.** One dependency to install, not "ccusage or codex-sqlite-reader depending on which flag you set."
 
-**If you can install agentsview:** `git pull`, install agentsview, run `npm run report`. That's it — existing `.env` settings are unchanged. The `USE_AGENTSVIEW` flag and `CCUSAGE_TIMEOUT_MS` are gone (delete them from your `.env` if present — they're ignored).
+**If you can install agentsview:** `git pull`, `npm ci`, install agentsview, run `npm run report`. That's it — existing `.env` settings are unchanged. The `USE_AGENTSVIEW` flag and `CCUSAGE_TIMEOUT_MS` are gone (delete them from your `.env` if present — they're ignored).
 
 **If you can't or don't want to install agentsview:** pin to the last ccusage-based release. This is a real, working version — it will stay reachable:
 
@@ -219,6 +234,8 @@ Your [profile page](https://aiworthusing.com/builder-index) shows how many machi
 
 If you already sync `~/.claude` from other machines to a central location (e.g. via rsync, Syncthing, or a tool like [engineering-notebook](https://github.com/obra/engineering-notebook)), you can aggregate all of them into a single report without installing the client on each machine. Set `EXTRA_CLAUDE_CONFIGS` in `.env` to a comma-separated list of directories, each containing a `projects/` subdirectory of Claude Code JSONL sessions:
 
+> **macOS:** configured extra homes are not supported inside the installed launchd job because AgentsView cannot safely refresh their isolated databases there. Scheduled reports fail loudly while any `EXTRA_*_CONFIGS` value is configured; run `npm run report` interactively, outside launchd, to collect them.
+
 ```
 EXTRA_CLAUDE_CONFIGS=/path/to/synced-laptop,/path/to/synced-desktop
 ```
@@ -229,6 +246,8 @@ The Codex equivalent is `EXTRA_CODEX_CONFIGS` — a comma-separated list of Code
 
 ```
 EXTRA_CODEX_CONFIGS=/path/to/codex-account-a,/path/to/codex-account-b
+# or, so new accounts are picked up without editing .env (an empty match aborts the run):
+EXTRA_CODEX_CONFIGS=/path/to/codex-account-*
 ```
 
 Pi harness and OpenCode can be aggregated the same way when their data lives outside the local machine's default AgentsView scan. These config values point directly at the data directory AgentsView should scan, not at a nested `projects/` or `sessions/` subdirectory:
@@ -387,6 +406,8 @@ Set `REPORT_DEV_STATS=true` to share how you actually code. This helps the commu
 
 **What's never sent:** file paths, prompt content, tool arguments, repo names, code, commit messages, API keys.
 
+Session statistics pass through a static allowlist before upload: dates, counts, token and cost aggregates, and model and tool *category* names. Anything outside it is dropped, so a field a future `agentsview` release adds stays on your machine until this client has reviewed it — you don't have to trust an upstream release note to know what leaves.
+
 The `REPORT_MACHINE_CONFIG` flag also now includes your configuration stack: MCP server names (no credentials), hook event types, CLAUDE.md size, shell/terminal/editor, and git worktree count.
 
 ### Which skills get reported
@@ -461,3 +482,9 @@ journalctl --user -u token-tracking-reporter
 ```
 npm run report
 ```
+
+## License
+
+Apache-2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE). Copyright 2025 The Plow Collective, Inc.
+
+"Plow" and the Plow logo are trademarks of The Plow Collective, Inc. The license grants no trademark rights.

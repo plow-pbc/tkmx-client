@@ -4,8 +4,18 @@ import * as path from "node:path";
 import * as os from "node:os";
 import * as fs from "node:fs";
 
-import { parseAgentsviewOutput, toIsoDate, collectAgentsviewUsage, discoverAgents, syncAgentsview, resolveAgentsviewWith } from "../reporter/agentsview";
+import {
+  parseAgentsviewOutput,
+  toIsoDate,
+  collectAgentsviewUsage,
+  collectAgentsviewAgentOnly,
+  discoverAgents,
+  syncAgentsview,
+  resolveAgentsviewWith,
+  isExecutableFile,
+} from "../reporter/agentsview";
 import { writeFakeIndex } from "./fake-index";
+import { LAUNCHD_LABEL } from "../reporter/install";
 
 // Write an executable fixture (default: a no-op shell stub) and mark it +x.
 function writeExec(p, body = "#!/bin/sh\n") {
@@ -146,6 +156,55 @@ function withFakeAgentsview(
   }
 }
 
+function withLaunchdEnvironment(fn: () => void): void {
+  const previous = process.env.XPC_SERVICE_NAME;
+  process.env.XPC_SERVICE_NAME = LAUNCHD_LABEL;
+  try {
+    fn();
+  } finally {
+    if (previous === undefined) delete process.env.XPC_SERVICE_NAME;
+    else process.env.XPC_SERVICE_NAME = previous;
+  }
+}
+
+// A real fleet machine emitted 1,259,935 bytes of `usage daily --json
+// --breakdown` for one agent over a 28-day window — past execFileSync's 1 MiB
+// default maxBuffer, which killed the whole report with ENOBUFS before it could
+// POST. The payload scales with distinct (date x model) rows in the window, not
+// with archive size, so a small machine can overrun it while a large one does not.
+//
+// Sized past 8 MiB on purpose, not just past the 1 MiB default. README's Backfill
+// section tells operators to run REPORT_DAYS=365 once, which at the observed
+// ~45 KB/day projects to ~15.7 MiB — so a single-digit-MiB ceiling fails the very
+// path the docs prescribe. A payload that only cleared 1 MiB would pass under a
+// ceiling too small for the backfill and prove nothing about it.
+//
+// The fake is node rather than sh so it can emit ~9 MiB without a per-row shell
+// loop; the sh version took seconds for a tenth of this.
+describe("collectAgentsviewUsage with a payload past the 8 MiB ceiling", () => {
+  it("reads a usage payload larger than a single-digit-MiB ceiling", () => {
+    withFakeAgentsview(
+      ["claude"],
+      () => `#!/usr/bin/env node
+if (process.argv[2] === "sync") process.exit(0);
+// ~9 MiB of valid JSON: one date, many model rows with padded names.
+const pad = "m".repeat(2048);
+const rows = [];
+for (let i = 0; i < 4200; i++) {
+  rows.push('{"modelName":"' + i + '-' + pad + '","inputTokens":1,"outputTokens":1}');
+}
+process.stdout.write('{"daily":[{"date":"2026-05-01","modelBreakdowns":[' + rows.join(",") + ']}]}\\n');
+`,
+      (fakeBin) => {
+        const usageByAgent = collectAgentsviewUsage(fakeBin, "20260501") as any;
+        assert.equal(usageByAgent.claude.length, 1, "the large payload must parse, not throw ENOBUFS");
+        assert.equal(usageByAgent.claude[0].date, "2026-05-01");
+        assert.equal(usageByAgent.claude[0].modelBreakdowns.length, 4200);
+      },
+    );
+  });
+});
+
 describe("collectAgentsviewUsage local agents", () => {
   it("collects whatever agents the index holds, syncing once first", () => {
     // `hermes` is the point: it's not one of the four this used to name, and
@@ -159,7 +218,7 @@ for arg in "$@"; do
   if [ "$prev" = "--agent" ]; then agent="$arg"; fi
   prev="$arg"
 done
-echo "$*" >> "${path.join(tmp, "calls.log")}"
+printf 'NO_DAEMON=%s|%s\n' "$AGENTSVIEW_NO_DAEMON" "$*" >> "${path.join(tmp, "calls.log")}"
 if [ "$1" = "sync" ]; then exit 0; fi
 printf '{"daily":[{"date":"2026-05-01","modelBreakdowns":[{"modelName":"%s-model","inputTokens":10,"outputTokens":2}]}]}\\n' "$agent"
 `,
@@ -171,7 +230,7 @@ printf '{"daily":[{"date":"2026-05-01","modelBreakdowns":[{"modelName":"%s-model
         assert.equal(usageByAgent.claude[0].modelBreakdowns[0].source, "claude");
 
         const lines = fs.readFileSync(path.join(tmp, "calls.log"), "utf-8").trim().split("\n");
-        assert.equal(lines[0], "sync", "sync runs before discovery reads the index");
+        assert.equal(lines[0], "NO_DAEMON=1|sync", "direct sync runs before discovery reads the index");
         const agents = lines.slice(1).map((line) => line.match(/--agent ([^ ]+)/)?.[1]);
         assert.deepEqual(agents.sort(), ["claude", "codex", "hermes"]);
         for (const line of lines.slice(1)) {
@@ -188,22 +247,46 @@ printf '{"daily":[{"date":"2026-05-01","modelBreakdowns":[{"modelName":"%s-model
   // the other side by discoverAgents, which still throws when the index can't
   // be read at all, so "never synced" stays a loud abort rather than a POST
   // of zero usage dressed up as a quiet day.
-  it("still reports last-synced data when the sync itself fails", () => {
-    withFakeAgentsview(
-      ["claude"],
-      (tmp) => `#!/bin/sh
+  it("still reports last-synced data when a launchd sync fails", () => {
+    withLaunchdEnvironment(() => {
+      withFakeAgentsview(
+        ["claude"],
+        (tmp) => `#!/bin/sh
 echo "$*" >> "${path.join(tmp, "calls.log")}"
 if [ "$1" = "sync" ]; then echo "spawnSync ETIMEDOUT" >&2; exit 1; fi
 echo '{"daily":[{"date":"2026-05-01","modelBreakdowns":[{"modelName":"m","inputTokens":10,"outputTokens":2}]}]}'
 `,
+        (fakeBin, tmp) => {
+          const usageByAgent = collectAgentsviewUsage(fakeBin, "20260501") as any;
+
+          assert.equal(usageByAgent.claude[0].date, "2026-05-01");
+
+          const lines = fs.readFileSync(path.join(tmp, "calls.log"), "utf-8").trim().split("\n");
+          assert.equal(lines[0], "sync", "sync was attempted");
+          assert.ok(lines.length > 1, "reads continue after the sync failed");
+        },
+      );
+    });
+  });
+
+  it("fails instead of reading stale data when direct sync fails outside launchd", () => {
+    withFakeAgentsview(
+      ["claude"],
+      (tmp) => `#!/bin/sh
+echo "$*" >> "${path.join(tmp, "calls.log")}"
+if [ "$1" = "sync" ]; then echo "rebuild failed" >&2; exit 1; fi
+echo '{"daily":[]}'
+`,
       (fakeBin, tmp) => {
-        const usageByAgent = collectAgentsviewUsage(fakeBin, "20260501") as any;
-
-        assert.equal(usageByAgent.claude[0].date, "2026-05-01");
-
-        const lines = fs.readFileSync(path.join(tmp, "calls.log"), "utf-8").trim().split("\n");
-        assert.equal(lines[0], "sync", "sync was attempted");
-        assert.ok(lines.length > 1, "reads continue after the sync failed");
+        assert.throws(
+          () => collectAgentsviewUsage(fakeBin, "20260501"),
+          /agentsview sync failed: rebuild failed/,
+        );
+        assert.equal(
+          fs.readFileSync(path.join(tmp, "calls.log"), "utf-8").trim(),
+          "sync",
+          "a failed direct sync must not reach stale reads",
+        );
       },
     );
   });
@@ -315,6 +398,95 @@ describe("collectAgentsviewUsage WARP_DIR scoping", () => {
   });
 });
 
+describe("collectAgentsviewAgentOnly strict isolated sync", () => {
+  it("direct-syncs the isolated home before reading it with --no-sync", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tkmx-extra-sync-"));
+    try {
+      const calls = path.join(tmp, "calls.log");
+      const bin = path.join(tmp, "fake-agentsview");
+      writeExec(bin, `#!/bin/sh
+printf 'NO_DAEMON=%s|WARP_DIR=%s|DATA=%s|SOURCE=%s|%s\n' "$AGENTSVIEW_NO_DAEMON" "$WARP_DIR" "$AGENT_VIEWER_DATA_DIR" "$CODEX_SESSIONS_DIR" "$*" >> "${calls}"
+if [ "$1" = "sync" ]; then sleep 0.5; exit 0; fi
+echo '{"daily":[{"date":"2026-08-29","modelBreakdowns":[{"modelName":"gpt-5.6-sol","inputTokens":10,"outputTokens":2}]}]}'
+`);
+      const dataDir = path.join(tmp, "index");
+      const sourceDir = path.join(tmp, "codex", "sessions");
+
+      const result = collectAgentsviewAgentOnly(
+        bin,
+        "20260829",
+        "codex",
+        {
+          AGENT_VIEWER_DATA_DIR: dataDir,
+          CODEX_SESSIONS_DIR: sourceDir,
+        },
+        250,
+      );
+
+      assert.equal(result[0].modelBreakdowns[0].totalTokens, 12);
+      const lines = fs.readFileSync(calls, "utf-8").trim().split("\n");
+      assert.equal(lines.length, 2);
+      assert.equal(
+        lines[0],
+        `NO_DAEMON=1|WARP_DIR=/var/empty|DATA=${dataDir}|SOURCE=${sourceDir}|sync`,
+      );
+      assert.match(lines[1], new RegExp(
+        `^NO_DAEMON=\\|WARP_DIR=\\|DATA=${dataDir}\\|SOURCE=${sourceDir}\\|usage daily `,
+      ));
+      assert.match(lines[1], /--agent codex/);
+      assert.match(lines[1], /--no-sync$/);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("fails immediately without syncing under reporter launchd", () => {
+    withLaunchdEnvironment(() => {
+      assert.throws(
+        () => collectAgentsviewAgentOnly("/must-not-run", "20260829", "codex", {}),
+        /configured extra homes require an out-of-launchd AgentsView refresh/,
+      );
+    });
+  });
+
+  it("throws on strict sync errors without querying usage", () => {
+    const cases = [
+      { name: "non-zero exit", syncBody: "echo boom >&2; exit 1", timeoutMs: 180000, errorPattern: /agentsview sync failed: boom/ },
+      { name: "timeout", syncBody: "exec sleep 30", timeoutMs: 1000, errorPattern: /agentsview sync failed: .*ETIMEDOUT/ },
+    ];
+    for (const testCase of cases) {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tkmx-extra-sync-"));
+      try {
+        const calls = path.join(tmp, "calls.log");
+        const bin = path.join(tmp, "fake-agentsview");
+        // Log only after the sync branch: a log written first races the timeout
+        // kill. So an absent log means usage never ran; the throw proves sync did.
+        writeExec(bin, `#!/bin/sh
+if [ "$1" = "sync" ]; then ${testCase.syncBody}; fi
+echo "$*" >> "${calls}"
+echo '{"daily":[]}'
+`);
+
+        assert.throws(
+          () => collectAgentsviewAgentOnly(
+            bin,
+            "20260829",
+            "codex",
+            {},
+            180000,
+            testCase.timeoutMs,
+          ),
+          testCase.errorPattern,
+          testCase.name,
+        );
+        assert.equal(fs.existsSync(calls), false, `${testCase.name}: usage must not run after a failed sync`);
+      } finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+      }
+    }
+  });
+});
+
 describe("resolveAgentsview", () => {
   // Isolate each case from the host's real agentsview install and any
   // ambient AGENTSVIEW_BIN env var. Tests that need $PATH to find
@@ -347,10 +519,24 @@ describe("resolveAgentsview", () => {
     return path.join(tmp, ".local", "bin", process.platform === "win32" ? "agentsview.exe" : "agentsview");
   }
 
+  // HOME/PATH isolation cannot reach the hard-coded system candidates
+  // (/opt/homebrew/bin, /usr/local/bin) — those are absolute, so on a host
+  // that really has agentsview installed there, any case expecting "not
+  // found" resolves the host's binary instead. Cases that assert a miss go
+  // through resolveAgentsviewWith with production's own executable check
+  // fenced to the sandbox, so they read the same on a dev box as in CI — and
+  // the cases that pin that check still exercise the real one.
+  function resolveSandboxed(tmp, env = {}) {
+    return resolveAgentsviewWith({
+      platform: process.platform,
+      env: { HOME: tmp, USERPROFILE: tmp, PATH: "", ...env },
+      isExecutable: (p) => p.startsWith(tmp + path.sep) && isExecutableFile(p),
+    });
+  }
+
   it("returns null when no candidate path exists", () => {
-    withIsolatedEnv(() => {
-      const { resolveAgentsview } = require("../reporter/agentsview");
-      assert.equal(resolveAgentsview(), null);
+    withIsolatedEnv((tmp) => {
+      assert.equal(resolveSandboxed(tmp), null);
     });
   });
 
@@ -369,16 +555,14 @@ describe("resolveAgentsview", () => {
       fs.mkdirSync(path.dirname(fake), { recursive: true });
       fs.writeFileSync(fake, "#!/bin/sh\n");
       fs.chmodSync(fake, 0o644); // not executable
-      const { resolveAgentsview } = require("../reporter/agentsview");
-      assert.equal(resolveAgentsview(), null);
+      assert.equal(resolveSandboxed(tmp), null);
     });
   });
 
   it("skips candidates that are directories, not files", () => {
     withIsolatedEnv((tmp) => {
       fs.mkdirSync(path.join(tmp, ".local", "bin", "agentsview"), { recursive: true });
-      const { resolveAgentsview } = require("../reporter/agentsview");
-      assert.equal(resolveAgentsview(), null);
+      assert.equal(resolveSandboxed(tmp), null);
     });
   });
 
@@ -409,9 +593,8 @@ describe("resolveAgentsview", () => {
       const pathDir = path.join(tmp, "custom", "bin");
       const fake = path.join(pathDir, process.platform === "win32" ? "agentsview.exe" : "agentsview");
       writeExec(fake);
-      process.env.PATH = [pathDir, "/usr/bin", "/bin"].join(path.delimiter);
-      const { resolveAgentsview } = require("../reporter/agentsview");
-      assert.equal(resolveAgentsview(), fake);
+      const PATH = [pathDir, "/usr/bin", "/bin"].join(path.delimiter);
+      assert.equal(resolveSandboxed(tmp, { PATH }), fake);
     });
   });
 

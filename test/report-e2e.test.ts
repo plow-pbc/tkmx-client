@@ -84,11 +84,15 @@ if (cmd === "usage") {
   console.log(${JSON.stringify(dailyJson)});
   process.exit(0);
 }
+if (process.env.FAIL_STATS) {
+  process.stderr.write("spawnSync agentsview ETIMEDOUT\\n");
+  process.exit(1);
+}
 let since = "";
 for (let i = 0; i < args.length; i++) {
   if (args[i] === "--since") since = args[i + 1] || "";
 }
-console.log(JSON.stringify({ schema_version: 1, window: { days_arg: since }, totals: { sessions_all: 7 }, generated_at: "2026-04-24T00:00:00Z" }));
+console.log(JSON.stringify({ schema_version: 2, window: { days: 28, since }, totals: { sessions_all: 7 }, generated_at: "2026-04-24T00:00:00Z" }));
 process.exit(0);
 `,
     );
@@ -128,6 +132,10 @@ case "$1" in
     echo ${shQuote(dailyJson)}
     ;;
   stats)
+    if [ -n "$FAIL_STATS" ]; then
+      echo "spawnSync agentsview ETIMEDOUT" >&2
+      exit 1
+    fi
     SINCE=""
     for ((i=1; i<=$#; i++)); do
       if [[ "\${!i}" == "--since" ]]; then
@@ -135,7 +143,7 @@ case "$1" in
         SINCE="\${!j}"
       fi
     done
-    printf '{"schema_version":1,"window":{"days_arg":"%s"},"totals":{"sessions_all":7},"generated_at":"2026-04-24T00:00:00Z"}\\n' "$SINCE"
+    printf '{"schema_version":2,"window":{"days":28,"since":"%s"},"totals":{"sessions_all":7},"generated_at":"2026-04-24T00:00:00Z"}\\n' "$SINCE"
     ;;
   *)
     echo "unexpected: $*" >&2
@@ -265,10 +273,13 @@ test("REPORT_DAYS=1 still invokes agentsview with --since 28d for session_stats"
         `stats invocation should use --since 28d, got: ${line}`,
       );
     }
+    // The argv assertion above is the window check: `window` is not an uploaded
+    // field (no server path reads it), so the POST body cannot carry it. What
+    // the body must show is that a blob was collected from that 28d call.
     assert.equal(
-      captured.session_stats?.window?.days_arg,
-      "28d",
-      "POSTed session_stats should reflect the 28d window that agentsview was asked for",
+      captured.session_stats?.totals?.sessions_all,
+      7,
+      "the 28d stats call's blob should be the one POSTed",
     );
     assert.equal(captured.report_days, 1);
   } finally {
@@ -483,9 +494,9 @@ test("inactive day (no usage rows) still posts and still refreshes session_stats
       "session_stats should still be collected and sent on an inactive day",
     );
     assert.equal(
-      captured.session_stats.window?.days_arg,
-      "28d",
-      "session_stats must still reflect the 28d window, not REPORT_DAYS=1",
+      captured.session_stats.totals?.sessions_all,
+      7,
+      "session_stats must still be collected on an inactive day",
     );
     // Sanity: stats invocation still happened despite no usage rows.
     const argvLines = fs.readFileSync(ctx.argvLog, "utf-8").trim().split("\n");
@@ -563,8 +574,16 @@ for (const tc of [
   { agent: "claude", envVar: "EXTRA_CLAUDE_CONFIGS", subdir: "projects", subdirEnvKey: "CLAUDE_PROJECTS_DIR", source: "claude" },
   { agent: "pi", envVar: "EXTRA_PI_CONFIGS", subdir: ".", subdirEnvKey: "PIEBALD_DIR", source: "pi" },
   { agent: "opencode", envVar: "EXTRA_OPENCODE_CONFIGS", subdir: ".", subdirEnvKey: "OPENCODE_DIR", source: "opencode" },
+]) for (const form of [
+  // A reviewer fleet adds accounts over time; a glob keeps the .env list from
+  // silently drifting behind `codex-account-*` (weeks of unreported usage).
+  { name: "explicit list", value: (root: string, a: string, b: string) => `${a},${b}` },
+  { name: "glob", value: (root: string) => path.join(root, "home-*") },
+  // Pinning one home explicitly beside a glob that re-matches it must not
+  // scan it twice — that would double its usage (the mirror of the undercount).
+  { name: "explicit + overlapping glob", value: (root: string, a: string) => `${a},${path.join(root, "home-*")}` },
 ]) {
-  test(`${tc.envVar} sums every configured home's usage into the ${tc.source} source, scanning each right home`, async () => {
+  test(`${tc.envVar} (${form.name}) sums every configured home's usage into the ${tc.source} source, scanning each right home`, async () => {
     const ctx = await setupE2E({
       dailyJson:
         '{"daily":[{"date":"2026-05-25","modelBreakdowns":[{"modelName":"gpt-5.5","inputTokens":1000,"outputTokens":100,"cacheCreationTokens":0,"cacheReadTokens":0}]}]}',
@@ -579,7 +598,7 @@ for (const tc of [
       const result = await runReporter({
         ...ctx.baseEnv,
         REPORT_DAYS: "3650", // wide window so the fixture date passes the sinceStr filter
-        [tc.envVar]: `${homeA},${homeB}`,
+        [tc.envVar]: form.value(extraRoot, homeA, homeB),
       });
       assert.equal(
         result.status,
@@ -624,6 +643,25 @@ for (const tc of [
     }
   });
 }
+
+// A glob that matches nothing is the same silent-undercount hazard as a
+// missing home: the operator configured it, so an empty expansion aborts.
+test("an EXTRA_*_CONFIGS glob that matches no directory aborts the run with no POST", async () => {
+  const extraRoot = fs.mkdtempSync(path.join(os.tmpdir(), "tkmx-glob-empty-"));
+  const ctx = await setupE2E({ dailyJson: '{"daily":[]}' });
+  try {
+    const result = await runReporter({
+      ...ctx.baseEnv,
+      EXTRA_CODEX_CONFIGS: path.join(extraRoot, "codex-account-*"),
+    });
+    assert.notEqual(result.status, 0, `reporter should abort on an empty glob.\nstdout:\n${result.stdout}`);
+    assert.match(result.stderr, /matches no directory/i);
+    assert.equal(ctx.getCaptured(), null, "no POST may reach the server");
+  } finally {
+    fs.rmSync(extraRoot, { recursive: true, force: true });
+    ctx.cleanup();
+  }
+});
 
 // Local agents come from the index, so an agent present only as a configured
 // extra home isn't discovered — the reporter unions the two. Without that, a
@@ -762,21 +800,42 @@ test("a frozen profile does not consume the one-shot transition markers", async 
     responseJson: { ok: true, profile_frozen: true },
   });
   try {
-    if (fs.existsSync(STATE_PATH)) fs.unlinkSync(STATE_PATH);
+    // Seed the prior edge this test is about: dev stats were ON, and this run
+    // turns them OFF, so clear_dev_stats must fire.
+    fs.writeFileSync(
+      STATE_PATH,
+      JSON.stringify({ dev_stats_on: true, session_stats_on: true }),
+      "utf-8",
+    );
 
-    const result = await runReporter(ctx.baseEnv);
+    const result = await runReporter({ ...ctx.baseEnv, REPORT_DEV_STATS: "false" });
     assert.equal(
       result.status,
       0,
       `reporter exited non-zero.\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
     );
-    assert.ok(ctx.getCaptured(), "the report is still sent to a frozen profile");
+    const captured = ctx.getCaptured();
+    assert.ok(captured, "the report is still sent to a frozen profile");
+    assert.equal(captured.clear_dev_stats, true, "the transition marker fired on this run");
+
+    // The reporter posts no self-assessed health at all. A machine that has
+    // stopped cannot send one, so the server reads its own last accepted POST
+    // instead; a client field reintroduced here would be the false signal that
+    // reasoning replaced.
     assert.equal(
-      fs.existsSync(STATE_PATH),
-      false,
+      captured.reporter_health,
+      undefined,
+      "the reporter must not post a self-assessed health verdict",
+    );
+
+    const persisted = JSON.parse(fs.readFileSync(STATE_PATH, "utf-8"));
+    assert.equal(
+      persisted.dev_stats_on,
+      true,
       "reporting state was recorded against a server that declined to apply it, " +
         "so the next run will treat the transition as already delivered",
     );
+    assert.equal(persisted.session_stats_on, true, "session_stats edge was consumed against a frozen profile");
     // This run is the only one in the suite that reaches the frozen-profile
     // notice, and a cycle that delivers nothing must not also be silent.
     assert.match(
@@ -784,6 +843,36 @@ test("a frozen profile does not consume the one-shot transition markers", async 
       /stay on its last snapshot/,
       `a frozen profile left the operator no indication the report was not applied:\n${result.stdout}`,
     );
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+// #104: agentsview stats has timed out 8 times on mbp since April. The usage
+// POST still returns 200, so the run printed "Server responded 200" and read as
+// healthy while the profile's stats panels silently kept an older window. The
+// one [session-stats] error scrolls past minutes earlier; nothing at the end of
+// the run said the panels were stale.
+test("a failed session-stats collection is loud at the end of the run", async () => {
+  const ctx = await setupE2E({ dailyJson: '{"daily":[]}' });
+  try {
+    const result = await runReporter({ ...ctx.baseEnv, FAIL_STATS: "1" });
+    const out = result.stdout + result.stderr;
+
+    assert.equal(result.status, 0, `usage is unaffected, so the run still succeeds:\n${out}`);
+    const captured = ctx.getCaptured();
+    assert.ok(captured, "the usage POST still happens when stats fail");
+    assert.equal(
+      captured.session_stats,
+      undefined,
+      "a failed collection must not post a stats blob",
+    );
+    assert.match(
+      out,
+      /SESSION STATS NOT UPDATED/,
+      `the run must end by saying the stats panels are stale:\n${out}`,
+    );
+    assert.match(out, /ETIMEDOUT/, `the cause must still reach the log:\n${out}`);
   } finally {
     ctx.cleanup();
   }

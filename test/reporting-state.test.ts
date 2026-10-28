@@ -4,53 +4,60 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
+// Imported at the top and typed, rather than require()d per test: the state
+// literals below are then checked against ReportingState, so a field added to
+// the interface fails here instead of being silently omitted by an `any`.
+import {
+  loadState,
+  saveState,
+  computeTransitionMarkers,
+  gateOnSnapshotHash,
+  type ReportingState,
+} from "../reporter/reporting-state";
+
+function tmpFile(prefix: string, name: string): string {
+  return path.join(fs.mkdtempSync(path.join(os.tmpdir(), prefix)), name);
+}
+
 test("loadState returns defaults when file absent", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tkmx-state-"));
-  const filePath = path.join(dir, "state.json");
-  const { loadState } = require("../reporter/reporting-state");
+  const filePath = tmpFile("tkmx-state-", "state.json");
   const state = loadState(filePath);
   assert.deepEqual(state, { dev_stats_on: false, session_stats_on: false });
 });
 
 test("saveState and loadState roundtrip", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tkmx-state-"));
-  const filePath = path.join(dir, "state.json");
-  const { loadState, saveState } = require("../reporter/reporting-state");
+  const filePath = tmpFile("tkmx-state-", "state.json");
   saveState(filePath, { dev_stats_on: true, session_stats_on: true });
   const loaded = loadState(filePath);
   assert.deepEqual(loaded, { dev_stats_on: true, session_stats_on: true });
 });
 
 test("computeTransitionMarkers: on→off emits clear signals", () => {
-  const { computeTransitionMarkers } = require("../reporter/reporting-state");
-  const prior = { dev_stats_on: true, session_stats_on: true };
-  const current = { dev_stats_on: false, session_stats_on: false };
+  const prior: ReportingState = { dev_stats_on: true, session_stats_on: true };
+  const current: ReportingState = { dev_stats_on: false, session_stats_on: false };
   const markers = computeTransitionMarkers(prior, current);
   assert.equal(markers.clear_dev_stats, true);
   assert.strictEqual(markers.session_stats, null);  // explicit null = clear
 });
 
 test("computeTransitionMarkers: steady-state off → no markers", () => {
-  const { computeTransitionMarkers } = require("../reporter/reporting-state");
-  const prior = { dev_stats_on: false, session_stats_on: false };
-  const current = { dev_stats_on: false, session_stats_on: false };
+  const prior: ReportingState = { dev_stats_on: false, session_stats_on: false };
+  const current: ReportingState = { dev_stats_on: false, session_stats_on: false };
   const markers = computeTransitionMarkers(prior, current);
   assert.equal(markers.clear_dev_stats, undefined);
   assert.equal("session_stats" in markers, false);
 });
 
 test("computeTransitionMarkers: steady-state on → no markers", () => {
-  const { computeTransitionMarkers } = require("../reporter/reporting-state");
-  const prior = { dev_stats_on: true, session_stats_on: true };
-  const current = { dev_stats_on: true, session_stats_on: true };
+  const prior: ReportingState = { dev_stats_on: true, session_stats_on: true };
+  const current: ReportingState = { dev_stats_on: true, session_stats_on: true };
   const markers = computeTransitionMarkers(prior, current);
   assert.equal(Object.keys(markers).length, 0);
 });
 
 test("computeTransitionMarkers: only dev_stats toggled", () => {
-  const { computeTransitionMarkers } = require("../reporter/reporting-state");
-  const prior = { dev_stats_on: true, session_stats_on: true };
-  const current = { dev_stats_on: false, session_stats_on: true };
+  const prior: ReportingState = { dev_stats_on: true, session_stats_on: true };
+  const current: ReportingState = { dev_stats_on: false, session_stats_on: true };
   const markers = computeTransitionMarkers(prior, current);
   assert.equal(markers.clear_dev_stats, true);
   assert.equal("session_stats" in markers, false);
@@ -63,9 +70,7 @@ test("computeTransitionMarkers: only dev_stats toggled", () => {
 // the reporter never touches the hash file — so without these a refactor that
 // moved the write back to collection time would go green.
 test("gateOnSnapshotHash does not write the hash until commit is called", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tkmx-gate-"));
-  const hashFile = path.join(dir, ".hash");
-  const { gateOnSnapshotHash } = require("../reporter/reporting-state");
+  const hashFile = tmpFile("tkmx-gate-", ".hash");
 
   const gate = gateOnSnapshotHash({ cpu: "M1" }, hashFile);
   assert.equal(fs.existsSync(hashFile), false, "hash written before delivery was confirmed");
@@ -75,9 +80,7 @@ test("gateOnSnapshotHash does not write the hash until commit is called", () => 
 });
 
 test("gateOnSnapshotHash re-offers an uncommitted snapshot on the next run", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tkmx-gate-"));
-  const hashFile = path.join(dir, ".hash");
-  const { gateOnSnapshotHash } = require("../reporter/reporting-state");
+  const hashFile = tmpFile("tkmx-gate-", ".hash");
 
   // First run collects but delivery fails, so commit() never runs.
   assert.notEqual(gateOnSnapshotHash({ cpu: "M1" }, hashFile), null);
@@ -88,18 +91,14 @@ test("gateOnSnapshotHash re-offers an uncommitted snapshot on the next run", () 
 });
 
 test("gateOnSnapshotHash returns null once an unchanged snapshot is committed", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tkmx-gate-"));
-  const hashFile = path.join(dir, ".hash");
-  const { gateOnSnapshotHash } = require("../reporter/reporting-state");
+  const hashFile = tmpFile("tkmx-gate-", ".hash");
 
   gateOnSnapshotHash({ cpu: "M1" }, hashFile).commit();
   assert.equal(gateOnSnapshotHash({ cpu: "M1" }, hashFile), null);
 });
 
 test("gateOnSnapshotHash offers again when the snapshot changes", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tkmx-gate-"));
-  const hashFile = path.join(dir, ".hash");
-  const { gateOnSnapshotHash } = require("../reporter/reporting-state");
+  const hashFile = tmpFile("tkmx-gate-", ".hash");
 
   gateOnSnapshotHash({ skills: ["a"] }, hashFile).commit();
   assert.notEqual(gateOnSnapshotHash({ skills: ["a", "b"] }, hashFile), null);
