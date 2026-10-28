@@ -45,11 +45,15 @@ for (const [name, impl] of [
 }
 
 test("a server that accepts the connection and never answers times out to null", async () => {
+  // The flag is what proves the timeout fired: a missing signal would also
+  // throw into the catch and return null, passing a bare null check.
+  let aborted = false;
   const n = await fetchPendingCount(SERVER, "alice", (_url, { signal }) =>
     new Promise((_resolve, reject) => {
-      signal.addEventListener("abort", () => reject(signal.reason));
+      signal.addEventListener("abort", () => { aborted = true; reject(signal.reason); });
     }), 20);
   assert.equal(n, null);
+  assert.ok(aborted, "the request was never aborted");
 });
 
 test("no username means no request at all", async () => {
