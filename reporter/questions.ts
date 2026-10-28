@@ -16,7 +16,7 @@ export interface PendingLineInput {
 // prints every two hours, forever, on machines whose owner may never be asked
 // a question at all.
 export function pendingLine({ pending, username, serverUrl }: PendingLineInput): string | null {
-  if (!Number.isFinite(pending) || pending < 1) return null;
+  if (pending < 1) return null;
   const noun = pending === 1 ? "question" : "questions";
   const url = new URL(`/ask/${encodeURIComponent(username)}`, serverUrl);
   return `  You have ${pending} unanswered ${noun} — answer at ${url}`;
