@@ -50,9 +50,10 @@ test("a server that accepts the connection and never answers times out to null",
   // The ref'd timer stands in for the open socket a real hung request holds;
   // without it the abort timer (unref'd) lets the loop drain on Node 22.
   let aborted = false;
+  const started = Date.now();
   const n = await fetchPendingCount(SERVER, "alice", (_url, { signal }) =>
     new Promise((_resolve, reject) => {
-      const socket = setTimeout(() => {}, 60_000);
+      const socket = setTimeout(() => {}, 1_000);
       signal.addEventListener("abort", () => {
         aborted = true;
         clearTimeout(socket);
@@ -61,6 +62,7 @@ test("a server that accepts the connection and never answers times out to null",
     }), 20);
   assert.equal(n, null);
   assert.ok(aborted, "the request was never aborted");
+  assert.ok(Date.now() - started < 1_000, "the caller's timeout was not the one applied");
 });
 
 test("no username means no request at all", async () => {
