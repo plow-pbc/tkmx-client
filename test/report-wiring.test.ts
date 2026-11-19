@@ -65,7 +65,7 @@ test("collectCursorStats uses statsSinceStr, not sinceStr", () => {
 // collectSessionStats must receive extraHomes derived from EXTRA_CLAUDE_CONFIGS.
 // The behavioral half — that a passed extra home is really queried and folded
 // in — lives in session-stats.test.ts, which a grep cannot cover.
-test("EXTRA_CLAUDE_CONFIGS reaches collectSessionStats, not just the token path", () => {
+test("extra Claude and Codex configs reach session stats, not just the token path", () => {
   // It must still reach the token path (the pre-existing behaviour).
   assert.match(
     SRC,
@@ -75,8 +75,8 @@ test("EXTRA_CLAUDE_CONFIGS reaches collectSessionStats, not just the token path"
   // And it must ALSO reach the stats blob.
   assert.match(
     SRC,
-    /extraStatsHomes\(\s*EXTRA_CLAUDE_CONFIGS\s*\)/,
-    "extraStatsHomes must be derived from EXTRA_CLAUDE_CONFIGS",
+    /extraStatsHomes\(\s*EXTRA_CLAUDE_CONFIGS\s*,\s*EXTRA_CODEX_CONFIGS\s*\)/,
+    "extraStatsHomes must include both EXTRA_CLAUDE_CONFIGS and EXTRA_CODEX_CONFIGS",
   );
   assert.match(
     SRC,

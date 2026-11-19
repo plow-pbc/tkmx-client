@@ -249,3 +249,48 @@ test("mergeSessionStats labels adoption primary-only when a denominator is unrec
   assert.equal(out.tool_mix.total_calls, 14);
   assert.equal(out.tool_mix.by_category.Bash, 4);
 });
+
+test("mergeSessionStats sums hourly temporal buckets across homes by timestamp", () => {
+  const { mergeSessionStats } = require("../reporter/session-stats");
+  const primary = {
+    schema_version: 2,
+    temporal: {
+      reporter_timezone: "America/Los_Angeles",
+      hourly_utc: [
+        { ts: "2026-11-18T08:00:00Z", sessions: 2, user_messages: 5 },
+        { ts: "2026-11-18T10:00:00Z", sessions: 1, user_messages: 3 },
+      ],
+    },
+  };
+  const extras = [
+    {
+      schema_version: 2,
+      temporal: {
+        reporter_timezone: "UTC",
+        hourly_utc: [
+          { ts: "2026-11-18T08:00:00Z", sessions: 4, user_messages: 11 },
+          { ts: "2026-11-18T09:00:00Z", sessions: 3, user_messages: 7 },
+        ],
+      },
+    },
+    {
+      schema_version: 2,
+      temporal: {
+        hourly_utc: [
+          { ts: "2026-11-18T09:00:00Z", sessions: 2, user_messages: 13 },
+        ],
+      },
+    },
+  ];
+
+  const out = mergeSessionStats(primary, extras);
+
+  assert.deepEqual(out.temporal, {
+    reporter_timezone: "America/Los_Angeles",
+    hourly_utc: [
+      { ts: "2026-11-18T08:00:00Z", sessions: 6, user_messages: 16 },
+      { ts: "2026-11-18T09:00:00Z", sessions: 5, user_messages: 20 },
+      { ts: "2026-11-18T10:00:00Z", sessions: 1, user_messages: 3 },
+    ],
+  });
+});

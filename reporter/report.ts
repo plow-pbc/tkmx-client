@@ -160,7 +160,7 @@ function agentsviewDataDirFor(absConfigDir: string): string {
 // The same extra homes the usage path collects, resolved to the isolated data
 // dirs collectExtraAgentsviewHomes already synced, for session_stats to RE-READ.
 //
-// Why this exists: EXTRA_CLAUDE_CONFIGS used to reach the token totals only.
+// Why this exists: extra config homes used to reach the token totals only.
 // collectSessionStats took no data-dir argument, so every stats panel
 // (subagents/session, plan mode, tool mix) silently described just the default
 // ~/.claude home while the operator had explicitly configured more. Tokens
@@ -172,9 +172,9 @@ function agentsviewDataDirFor(absConfigDir: string): string {
 // earlier in the same run by collectExtraAgentsviewHomes, so a missing one
 // means that home was not collected and there is nothing to read. Nothing here
 // syncs — see ExtraStatsHome.
-function extraStatsHomes(raw: string): ExtraStatsHome[] {
+function extraStatsHomes(...rawConfigs: string[]): ExtraStatsHome[] {
   const homes: ExtraStatsHome[] = [];
-  for (const absEntry of parseExtraConfigs(raw)) {
+  for (const absEntry of parseExtraConfigs(rawConfigs.join(","))) {
     const dataDir = agentsviewDataDirFor(absEntry);
     if (!fs.existsSync(dataDir)) continue;
     homes.push({ name: path.basename(absEntry) || absEntry, dataDir });
@@ -532,9 +532,9 @@ async function main(): Promise<void> {
 
     if (currentState.session_stats_on) {
       console.log("  Collecting session stats (agentsview)...");
-      const statsHomes = extraStatsHomes(EXTRA_CLAUDE_CONFIGS);
+      const statsHomes = extraStatsHomes(EXTRA_CLAUDE_CONFIGS, EXTRA_CODEX_CONFIGS);
       if (statsHomes.length > 0) {
-        console.log(`  Session stats: folding in ${statsHomes.length} extra Claude home(s)`);
+        console.log(`  Session stats: folding in ${statsHomes.length} extra home(s)`);
       }
       const ss = collectSessionStats({ sinceDays: STATS_WINDOW_DAYS, extraHomes: statsHomes });
       if (ss) {
