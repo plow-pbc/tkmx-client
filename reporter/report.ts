@@ -172,12 +172,12 @@ function agentsviewDataDirFor(absConfigDir: string): string {
 // earlier in the same run by collectExtraAgentsviewHomes, so a missing one
 // means that home was not collected and there is nothing to read. Nothing here
 // syncs — see ExtraStatsHome.
-function extraStatsHomes(...rawConfigs: string[]): ExtraStatsHome[] {
+function extraStatsHomes(agent: string, rawConfig: string): ExtraStatsHome[] {
   const homes: ExtraStatsHome[] = [];
-  for (const absEntry of parseExtraConfigs(rawConfigs.join(","))) {
+  for (const absEntry of parseExtraConfigs(rawConfig)) {
     const dataDir = agentsviewDataDirFor(absEntry);
     if (!fs.existsSync(dataDir)) continue;
-    homes.push({ name: path.basename(absEntry) || absEntry, dataDir });
+    homes.push({ name: path.basename(absEntry) || absEntry, dataDir, agent });
   }
   return homes;
 }
@@ -532,7 +532,10 @@ async function main(): Promise<void> {
 
     if (currentState.session_stats_on) {
       console.log("  Collecting session stats (agentsview)...");
-      const statsHomes = extraStatsHomes(EXTRA_CLAUDE_CONFIGS, EXTRA_CODEX_CONFIGS);
+      const statsHomes = [
+        ...extraStatsHomes("claude", EXTRA_CLAUDE_CONFIGS),
+        ...extraStatsHomes("codex", EXTRA_CODEX_CONFIGS),
+      ];
       if (statsHomes.length > 0) {
         console.log(`  Session stats: folding in ${statsHomes.length} extra home(s)`);
       }

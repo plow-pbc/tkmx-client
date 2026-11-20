@@ -75,7 +75,7 @@ test("extra Claude and Codex configs reach session stats, not just the token pat
   // And it must ALSO reach the stats blob.
   assert.match(
     SRC,
-    /extraStatsHomes\(\s*EXTRA_CLAUDE_CONFIGS\s*,\s*EXTRA_CODEX_CONFIGS\s*\)/,
+    /extraStatsHomes\(\s*"claude"\s*,\s*EXTRA_CLAUDE_CONFIGS\s*\)[\s\S]*extraStatsHomes\(\s*"codex"\s*,\s*EXTRA_CODEX_CONFIGS\s*\)/,
     "extraStatsHomes must include both EXTRA_CLAUDE_CONFIGS and EXTRA_CODEX_CONFIGS",
   );
   assert.match(

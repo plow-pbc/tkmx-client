@@ -118,6 +118,10 @@ function usePerDataDirAgentsview(): void {
     `const path = require("path");
 if (path.basename(process.argv[1] || "") !== "stats") return;
 const extra = String(process.env.AGENT_VIEWER_DATA_DIR || "").includes("extra-home");
+if (extra && !process.argv.some((arg, i) => arg === "--agent" && process.argv[i + 1] === "codex")) {
+  console.error("extra Codex stats were not filtered to codex");
+  process.exit(3);
+}
 console.log(extra
   ? '{"schema_version":1,"window":{"days":28},"totals":{"sessions_all":50,"messages_total":500},"tool_mix":{"by_category":{"Bash":20,"Task":2},"total_calls":22},"adoption":{"subagents_per_session":0.04,"plan_mode_rate":0.02,"distinct_skills":3},"generated_at":"2026-04-18T00:00:00Z"}'
   : '{"schema_version":1,"window":{"days":28},"totals":{"sessions_all":200,"messages_total":2000},"tool_mix":{"by_category":{"Bash":100,"Task":10},"total_calls":110},"adoption":{"subagents_per_session":0.05,"plan_mode_rate":0.01,"distinct_skills":7},"generated_at":"2026-04-18T00:00:00Z"}');
@@ -133,7 +137,7 @@ test("collectSessionStats folds an extra home's data dir into the blob", () => {
   const { collectSessionStats } = require("../reporter/session-stats");
   const out = collectSessionStats({
     sinceDays: 28,
-    extraHomes: [{ name: "acct", dataDir: "/tmp/extra-home-acct" }],
+    extraHomes: [{ name: "acct", dataDir: "/tmp/extra-home-acct", agent: "codex" }],
   });
   assert.ok(out);
   // Counts are summed across both homes.
@@ -176,7 +180,7 @@ test("an unreadable extra home is skipped, and the primary blob survives intact"
   const { collectSessionStats } = require("../reporter/session-stats");
   const out = collectSessionStats({
     sinceDays: 28,
-    extraHomes: [{ name: "broken", dataDir: "/tmp/broken-home-acct" }],
+    extraHomes: [{ name: "broken", dataDir: "/tmp/broken-home-acct", agent: "codex" }],
   });
   assert.ok(out, "a failed extra home must not null out the whole blob");
   // Identical to the no-extras case: nothing merged, nothing invented.
@@ -195,8 +199,8 @@ test("a good extra home is still merged when a sibling home fails", () => {
   const out = collectSessionStats({
     sinceDays: 28,
     extraHomes: [
-      { name: "broken", dataDir: "/tmp/broken-home-acct" },
-      { name: "acct", dataDir: "/tmp/extra-home-acct" },
+      { name: "broken", dataDir: "/tmp/broken-home-acct", agent: "codex" },
+      { name: "acct", dataDir: "/tmp/extra-home-acct", agent: "codex" },
     ],
   });
   assert.ok(out);

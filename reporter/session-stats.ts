@@ -256,6 +256,7 @@ export function sanitizeSessionStats(value: unknown): SessionStatsBlob | null {
 export interface ExtraStatsHome {
   name: string;
   dataDir: string;
+  agent: string;
 }
 
 type Adoption = Record<string, unknown> & {
@@ -507,7 +508,7 @@ export function collectSessionStats({
   for (const home of extraHomes) {
     const blob = runStats(
       bin,
-      args,
+      [...args, "--agent", home.agent],
       { ...process.env, AGENT_VIEWER_DATA_DIR: home.dataDir },
       ` (${home.name})`,
     );
