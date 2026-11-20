@@ -16,6 +16,10 @@ if [[ "$1" == "stats" ]]; then
     exit 2
   fi
   if [[ "${AGENT_VIEWER_DATA_DIR:-}" == *extra-home* ]]; then
+    [[ " $* " == *" --agent codex "* ]] || {
+      echo "extra Codex stats were not filtered to codex" >&2
+      exit 3
+    }
     cat <<'JSON'
 {"schema_version":1,"window":{"days":28},"totals":{"sessions_all":50,"messages_total":500},"tool_mix":{"by_category":{"Bash":20,"Task":2},"total_calls":22},"adoption":{"subagents_per_session":0.04,"plan_mode_rate":0.02,"distinct_skills":3},"generated_at":"2026-04-18T00:00:00Z"}
 JSON

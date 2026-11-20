@@ -256,6 +256,7 @@ export function sanitizeSessionStats(value: unknown): SessionStatsBlob | null {
 export interface ExtraStatsHome {
   name: string;
   dataDir: string;
+  agent: string;
 }
 
 type Adoption = Record<string, unknown> & {
@@ -329,8 +330,9 @@ function sumNumericInto(target: Record<string, unknown>, src: Record<string, unk
 //                          skill names, so a skill used in two homes cannot be
 //                          de-duplicated; max is an honest lower bound and
 //                          summing would inflate it.
+//   • temporal.hourly_utc  summed by timestamp (both counters are additive)
 //   • everything else      the primary home's value, unchanged. Distributions,
-//                          archetypes, velocity and temporal shapes do not
+//                          archetypes and velocity shapes do not
 //                          publish the weighting they were built from, so
 //                          there is nothing to combine them on.
 //
@@ -347,6 +349,32 @@ export function mergeSessionStats(
   const totals: Record<string, unknown> = { ...(asRecord(primary.totals) ?? {}) };
   for (const e of extras) sumNumericInto(totals, asRecord(e.totals));
   if (Object.keys(totals).length > 0) out.totals = totals as SessionStatsBlob["totals"];
+
+  const primaryTemporal = asRecord(primary.temporal);
+  const hourlyByTimestamp = new Map<string, { ts: string; sessions: number; user_messages: number }>();
+  for (const blob of [primary, ...extras]) {
+    const hourly = asRecord(blob.temporal)?.hourly_utc;
+    if (!Array.isArray(hourly)) continue;
+    for (const value of hourly) {
+      const row = asRecord(value);
+      const ts = typeof row?.ts === "string" ? row.ts : null;
+      const sessions = num(row?.sessions);
+      const userMessages = num(row?.user_messages);
+      if (ts === null || sessions === null || userMessages === null) continue;
+      const current = hourlyByTimestamp.get(ts);
+      hourlyByTimestamp.set(ts, {
+        ts,
+        sessions: (current?.sessions ?? 0) + sessions,
+        user_messages: (current?.user_messages ?? 0) + userMessages,
+      });
+    }
+  }
+  if (hourlyByTimestamp.size > 0) {
+    out.temporal = {
+      ...(primaryTemporal ?? {}),
+      hourly_utc: [...hourlyByTimestamp.values()].sort((a, b) => a.ts.localeCompare(b.ts)),
+    };
+  }
 
   const pmix = asRecord(primary.tool_mix);
   if (pmix) {
@@ -480,7 +508,7 @@ export function collectSessionStats({
   for (const home of extraHomes) {
     const blob = runStats(
       bin,
-      args,
+      [...args, "--agent", home.agent],
       { ...process.env, AGENT_VIEWER_DATA_DIR: home.dataDir },
       ` (${home.name})`,
     );
