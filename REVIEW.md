@@ -1,5 +1,9 @@
 # Review instructions — tkmx-client
 
+## Cause-first bug fixes
+
+Fix at the cause; never with a workaround that leaves the cause in place. A guard or check at the boundary where the cause lives is a cause-level fix. If a fix adds a maintained path or net complexity, explain why removing the cause directly is insufficient. Label any authorized temporary containment and state when it can be removed. When the bug comes from a duplicated source or identity, remove the duplicate rather than bridging the two. Limits a REVIEW.md already records as accepted stay out of review unless the diff widens them.
+
 Reviewer-facing policy for this repo. Read it before any other input: it carries
 the operating point and the voice posture every finding must satisfy. The
 review-loop rules are org policy and are appended by each reviewer from its own
